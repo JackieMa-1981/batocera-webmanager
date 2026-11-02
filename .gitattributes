@@ -1,0 +1,6 @@
+# Store and check out every text file with LF line endings, on every platform.
+# The panel deploys to a Linux device; CRLF in the working copy made local
+# byte-count comparisons against deployed files report false mismatches.
+# 所有文本文件在任何平台都以 LF 存储与检出。面板部署到 Linux 设备，
+# 工作区若为 CRLF 会导致本地与部署端的字节数比对出现假不一致。
+* text=auto eol=lf
