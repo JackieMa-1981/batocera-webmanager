@@ -4,7 +4,7 @@
 
 A browser-based management panel for [Batocera](https://batocera.org/) — pure Python 3 standard library, **zero dependencies**. Manage games, download ROMs over BitTorrent/HTTP, scrape metadata, back up your userdata, and tweak system settings from any browser on your LAN.
 
-基于浏览器的 [Batocera](https://batocera.org/) 管理面板 —— 纯 Python 3 标准库实现，**零依赖**。在局域网任意浏览器里管理游戏、通过 BT/HTTP 在线下载游戏、刮削元数据、备份用户数据、调整系统设置。
+基于浏览器的 [Batocera 43.1](https://batocera.org/) 管理面板 —— 纯 Python 3 标准库实现，**零依赖**。在局域网任意浏览器里管理游戏、通过 BT/HTTP 在线下载游戏、刮削元数据、备份用户数据、调整系统设置。
 
 ---
 
