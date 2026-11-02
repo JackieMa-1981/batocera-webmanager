@@ -7,7 +7,9 @@ verification.  No external dependencies.
 极简纯 Python BitTorrent 下载器：DHT 节点发现（BEP5）、Tracker 宣布
 （UDP BEP15 + HTTP）、选择性文件下载、SHA1 分块校验。无外部依赖。"""
 
+import base64
 import hashlib
+import json
 import os
 import random
 import socket
@@ -202,7 +204,12 @@ class DHTFinder(threading.Thread):
         self.tid += 1
         args = {b'id': self.mid}
         args.update(extra)
-        msg = benc({b't': str(self.tid).encode(), b'y': b'q', b'q': q, b'a': args})
+        # BEP5 recommends a 2-byte opaque tid; an ever-growing decimal string
+        # (3+ bytes above 99) can be dropped by strict implementations (B6).
+        # BEP5 建议 2 字节不透明事务 ID；递增十进制串超过 99 后超 2 字节，
+        # 可能被严格实现丢弃（B6）。响应不按 tid 匹配，随机值即可。
+        t = bytes((self.tid & 0xFF, random.getrandbits(8)))
+        msg = benc({b't': t, b'y': b'q', b'q': q, b'a': args})
         try:
             if isinstance(addr[0], str):
                 sock.sendto(msg, (addr[0], addr[1]))
@@ -789,9 +796,81 @@ class Job(object):
 
     def _prepare(self):
         os.makedirs(self.dest_dir, exist_ok=True)
+        # piece-level resume: trust the sidecar bitmap left by an
+        # interrupted run (pieces were sha1-verified before being recorded)
+        # 分块级断点续传：信任上次中断留下的旁车位图（记录前已通过 sha1 校验）。
+        self._load_resume()
         for idx, d in self.files_map.items():
-            self.handles[idx] = open(d["part"], "w+b")  # read back for uploads
+            # keep existing bytes for resume: "w+b" would zero the file
+            # 保留已有数据以支持续传："w+b" 会把文件清零。
+            mode = "r+b" if os.path.exists(d["part"]) else "w+b"
+            self.handles[idx] = open(d["part"], mode)  # read back for uploads
             self.handles[idx].truncate(d["size"])
+
+    # ---- piece-level resume (分块级断点续传) ----
+    # 续传元数据为任务首个文件 .part 旁的 JSON 文件，按任务（infohash）区分。
+    def _meta_path(self):
+        first = self.files_map[next(iter(self.files_map))]
+        return first["part"] + ".meta"
+
+    # 将当前已完成分块位图写入旁车元数据，供中断后恢复；每完成一个分块调用。
+    def _save_resume(self):
+        if not self.files_map:
+            return
+        bits = bytearray((self.t.npieces + 7) // 8)
+        for p in self.done_pieces:
+            bits[p // 8] |= 1 << (7 - p % 8)
+        meta = {"infohash": self.t.infohash.hex(),
+                "size": self.t.total,
+                "piece_length": self.t.piece_length,
+                "pieces": base64.b64encode(bytes(bits)).decode("ascii")}
+        try:
+            with open(self._meta_path(), "w") as f:
+                json.dump(meta, f)
+        except OSError:
+            pass
+
+    # 启动时加载续传元数据：校验 infohash/总大小/分块长度及 .part 文件尺寸，
+    # 全部匹配则信任位图，将对应分块标记为已完成（跳过重新下载）。
+    def _load_resume(self):
+        try:
+            with open(self._meta_path()) as f:
+                meta = json.load(f)
+        except (OSError, ValueError):
+            return
+        if meta.get("infohash") != self.t.infohash.hex() or \
+                meta.get("size") != self.t.total or \
+                meta.get("piece_length") != self.t.piece_length:
+            return
+        for d in self.files_map.values():
+            try:
+                if os.path.getsize(d["part"]) != d["size"]:
+                    return
+            except OSError:
+                return
+        try:
+            bits = base64.b64decode(meta.get("pieces", ""))
+        except Exception:
+            return
+        for p in range(min(self.t.npieces, len(bits) * 8)):
+            if bits[p // 8] & (1 << (7 - p % 8)) and p in self._need_set:
+                self._resume_piece(p)
+        if self.done_pieces:
+            self.log("resume: %d/%d pieces restored from .part.meta"
+                     % (len(self.done_pieces), self.piece_total))
+
+    # 将续传恢复的分块计入各文件进度与上传位图（数据已在 .part 文件中）。
+    def _resume_piece(self, piece):
+        p0 = piece * self.t.piece_length
+        pend = p0 + self.t.piece_size(piece)
+        for idx, d in self.files_map.items():
+            fs, fe = d["offset"], d["offset"] + d["size"]
+            a, b = max(fs, p0), min(fe, pend)
+            if a < b:
+                d["got"] += b - a
+                self.bytes_done += b - a
+        self.done_pieces.add(piece)
+        self._have_bits[piece // 8] |= 1 << (7 - piece % 8)
 
     def _connectable(self, addr):
         """Cheap filter: only try peers that look like real IP:port strings."""
@@ -1010,6 +1089,7 @@ class Job(object):
             self.done_pieces.add(piece)
             self.claimed.pop(piece, None)
             self._have_bits[piece // 8] |= 1 << (7 - piece % 8)
+            self._save_resume()  # keep the resume sidecar consistent / 保持续传元数据一致
         now = time.time()
         if now - self._last_t >= 1.0:
             self.speed = (self.bytes_done - self._last_bytes) / (now - self._last_t)
@@ -1033,6 +1113,12 @@ class Job(object):
                     os.replace(d["part"], d["dest"])
                 except OSError:
                     pass
+            # download finished: the resume sidecar is no longer needed
+            # 下载完成：删除续传旁车元数据文件。
+            try:
+                os.remove(self._meta_path())
+            except OSError:
+                pass
 
     @staticmethod
     def _recv_exact(sock, n):

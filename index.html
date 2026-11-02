@@ -237,6 +237,11 @@ input.inp.w{width:110px}
         <button onclick="dlSaveConf('webmanager.dl_port',$('dlPortIn').value.trim()||'6881')" data-i18n="save">Save</button>
         <span class="hint" data-i18n="dl_port_hint">Inbound peer connections (forward it on your router for better swarm connectivity; default 6881)</span>
       </div>
+      <div class="row"><label data-i18n="sec_token_lbl">Access Token</label>
+        <input type="text" id="wmTokenIn" style="width:260px">
+        <button onclick="dlSaveConf('webmanager.token',$('wmTokenIn').value.trim())" data-i18n="save">Save</button>
+        <span class="hint" data-i18n="sec_token_hint">When set, every browser must enter this token to use the panel. Leave empty to disable.</span>
+      </div>
     </div>
     <div class="card"><h2 data-i18n="all_params">All Settings (batocera.conf)</h2>
       <div class="row">
@@ -429,6 +434,7 @@ const FALLBACK_LOCALE = {
   dl_upload_lbl:'BT Upload', dl_upload_hint:'Share downloaded pieces back to other peers (default on)',
   dl_seed_lbl:'BT Seeding', dl_seed_hint:'Keep seeding after a download finishes so other devices can fetch from this one (default on)',
   dl_port_lbl:'BT Listen Port', dl_port_hint:'Inbound peer connections (forward it on your router for better swarm connectivity; default 6881)',
+  sec_token_lbl:'Access Token', sec_token_hint:'When set, every browser must enter this token to use the panel. Leave empty to disable.', auth_prompt:'This panel is protected. Enter the access token (webmanager.token in Settings):',
   dl_seeding:'Seeding', dl_seeding_up:'↑ {s}/s to {n} peer(s)',
   scrape_btn:'Scrape {n} missing', scrape_running:'Scraping {done}/{total} (found {found}): {cur}',
   scrape_done:'Scrape finished — found {found}, no match {notfound}, errors {errors}',
@@ -750,7 +756,7 @@ async function loadLocale() {
 }
 async function loadOverlayList() {
   try {
-    const j = await fetch('/api/controller-overlay/list').then(r => r.json());
+    const j = await api('/api/controller-overlay/list');
     overlaysAvailable = (j && j.overlays) || [];
   } catch (e) {
     overlaysAvailable = ['generic', 'xbox', 'ps3', 'mame'];
@@ -768,11 +774,34 @@ function setLang(l){
 // ---------- Small helpers: DOM, fetch API, formatting, toast / 小工具：DOM、接口请求、格式化与提示 ----------
 const $=id=>document.getElementById(id);
 function toast(msg,err){const d=document.createElement('div');d.className='toast'+(err?' err':'');d.textContent=msg;$('toast').appendChild(d);setTimeout(()=>d.remove(),4000)}
-async function api(path,opts){const r=await fetch(path,opts);const j=await r.json().catch(()=>({ok:false,error:'HTTP '+r.status}));if(!r.ok||j.ok===false)throw new Error(j.error||('HTTP '+r.status));return j}
-async function post(path,data){return api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})}
+// ---- Access-token auth (A1): token lives in localStorage, sent as Bearer header
+// (or ?token= for <img>/<a> URLs that cannot carry headers). On 401 the user is
+// prompted once and the call retried. / 访问令牌认证：令牌存于 localStorage，
+// 以 Bearer 头发送（img/a 等无法带头的 URL 用 ?token= 附加），401 时提示输入并重试。
+let WM_TOKEN=localStorage.getItem('wm_token')||'';
+function authHdr(){return WM_TOKEN?{'Authorization':'Bearer '+WM_TOKEN}:{}}
+function authUrl(u){return WM_TOKEN?u+(u.indexOf('?')>=0?'&':'?')+'token='+encodeURIComponent(WM_TOKEN):u}
+async function api(path,opts,_retried){opts=opts||{};opts.headers={...authHdr(),...(opts.headers||{})};const r=await fetch(path,opts);if(r.status===401&&!_retried){const tok=prompt(t('auth_prompt'));if(tok===null)throw new Error('unauthorized');WM_TOKEN=tok.trim();localStorage.setItem('wm_token',WM_TOKEN);return api(path,opts,true)}const j=await r.json().catch(()=>({ok:false,error:'HTTP '+r.status}));if(!r.ok||j.ok===false)throw new Error(j.error||('HTTP '+r.status));return j}
+async function post(path,data){return api(path,{method:'POST','headers':{'Content-Type':'application/json'},body:JSON.stringify(data)})}
 function fmtSize(n){for(const u of['B','KB','MB','GB','TB']){if(n<1024)return n.toFixed(1)+u;n/=1024}return n.toFixed(1)+'PB'}
 function fmtUp(s){const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return (lang==='zh'||lang==='zh_TW')?((d?d+'天':'')+h+'时'+m+'分'):((d?d+'d ':'')+h+'h '+m+'m')}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+// ---- Delegated clicks for data-act elements: server-supplied names ride in data-* attributes, never inside inline JS strings (self-XSS safe) / data-act 委托点击：服务端返回的名称只放入 data-* 属性，绝不拼入内联 JS 字符串（防自 XSS）----
+document.addEventListener('click',e=>{
+  const el=e.target.closest('[data-act]');
+  if(!el)return;
+  const d=el.dataset;
+  if(d.act==='bk-restore')restoreBackup(d.f,d.what);
+  else if(d.act==='bk-del')deleteBackup(d.f);
+  else if(d.act==='sys-sel')selectSys(d.sys);
+  else if(d.act==='game-go')gameGo(d.dir||'');
+  else if(d.act==='game-rename')renameGame(d.rel,d.file);
+  else if(d.act==='bios-pick')pickBios(d.path);
+  else if(d.act==='fm-go')fmGo(d.path);
+  else if(d.act==='fm-rename')fmRename(d.path,d.name);
+  else if(d.act==='dl-one')dlOne(d.n);
+});
 
 // ---------- Navigation / 标签导航 ----------
 let curTab='dash';
@@ -960,9 +989,9 @@ function renderBkFiles(list){
     +list.map(b=>{
       const what=b.sets?b.sets.map(k=>t('bk_s_'+k)).join(', '):'?';
       return `<tr><td class="mono">${esc(b.name)}</td><td>${new Date(b.mtime*1000).toLocaleString()}</td><td>${fmtSize(b.size)}</td><td class="hint">${esc(what)}</td>
-      <td style="white-space:nowrap"><button onclick="restoreBackup('${esc(b.name)}','${esc(what)}')">${t('bk_restore')}</button>
-      <a href="/api/backup/download?f=${encodeURIComponent(b.name)}"><button>${t('download')}</button></a>
-      <button class="danger" onclick="deleteBackup('${esc(b.name)}')">${t('bk_delete')}</button></td></tr>`}).join('');
+      <td style="white-space:nowrap"><button data-act="bk-restore" data-f="${esc(b.name)}" data-what="${esc(what)}">${t('bk_restore')}</button>
+      <a href="${authUrl('/api/backup/download?f='+encodeURIComponent(b.name))}"><button>${t('download')}</button></a>
+      <button class="danger" data-act="bk-del" data-f="${esc(b.name)}">${t('bk_delete')}</button></td></tr>`}).join('');
 }
 async function startBackup(){
   const sets=[...document.querySelectorAll('.bkset:checked')].map(c=>c.value);
@@ -1116,6 +1145,7 @@ async function loadConf(){
     if($('dlUploadEn'))$('dlUploadEn').checked=m['webmanager.dl_upload']!=='0';
     if($('dlSeedEn'))$('dlSeedEn').checked=m['webmanager.dl_seed']!=='0';
     if($('dlPortIn'))$('dlPortIn').value=m['webmanager.dl_port']||'6881';
+    if($('wmTokenIn'))$('wmTokenIn').value=m['webmanager.token']||'';
     refreshIaState();
   }catch(e){toast(t('err_conf')+e.message,1)}
 }
@@ -1208,7 +1238,7 @@ function padOverlayHtml(d, di){
       labels.push(`<div class="pad-btn-label${axis ? ' is-axis' : ''}" style="left:${pos.x}%;top:${pos.y + 2.6}%" title="${esc(inp.name)} · ${esc(inp.type)} ${esc(inp.id)} = ${esc(inp.value)}">${esc(fmtBinding(inp))}</div>`);
     }
     visual = `<div class="pad-overlay-wrap" data-di="${di}">
-        <img src="/api/controller-overlay?name=${esc(type.overlay)}" onerror="this.style.opacity='0.15'">
+        <img src="${authUrl('/api/controller-overlay?name='+encodeURIComponent(type.overlay))}" onerror="this.style.opacity='0.15'">
         ${labels.join('')}
       </div>`;
   }
@@ -1310,7 +1340,7 @@ function renderSysList(){
     if(selectedTypes.size&&!selectedTypes.has(s.type||'通用'))return false;
     return !q||s.name.includes(q)||s.fullname.toLowerCase().includes(q);
   });
-  $('sysItems').innerHTML=list.map(s=>`<div class="item ${curSys===s.name?'on':''}" onclick="selectSys('${esc(s.name)}')">
+  $('sysItems').innerHTML=list.map(s=>`<div class="item ${curSys===s.name?'on':''}" data-act="sys-sel" data-sys="${esc(s.name)}">
     <span>${esc(s.fullname||s.name)}</span><span class="cnt">${s.romCount||''}</span></div>`).join('')||'<div class="loading">'+t('no_match')+'</div>';
 }
 function coreOptions(s){
@@ -1327,7 +1357,7 @@ async function selectSys(name){
   const src=!!s.source;
   $('sysDetail').innerHTML=`
     <div class="card"><div class="sys-head">
-        <img src="/api/system-art?name=${esc(s.name)}" onerror="this.style.display='none'">
+        <img src="${authUrl('/api/system-art?name='+encodeURIComponent(s.name))}" onerror="this.style.display='none'">
         <div class="meta">
           <h2 style="margin:0;color:var(--accent);font-size:15px">${esc(s.fullname)} <span class="pill">${esc(s.name)}</span></h2>
           <div class="hint" style="margin-top:4px">${esc(s.manufacturer||'')}${s.extensions.length?' · '+s.extensions.join(' '):''}</div>
@@ -1433,24 +1463,24 @@ async function loadGames(){
     }
     dlNames=lib?(lib.names||{}):{};
     const parts=curDir?curDir.split('/'):[];
-    $('gameCrumbs').innerHTML=`<span class="crumb" onclick="gameGo('')">${esc(curSys)}</span>`+
-      parts.map((seg,i)=>` / <span class="crumb" onclick="gameGo('${esc(parts.slice(0,i+1).join('/'))}')">${esc(seg)}</span>`).join('');
+    $('gameCrumbs').innerHTML=`<span class="crumb" data-act="game-go" data-dir="">${esc(curSys)}</span>`+
+      parts.map((seg,i)=>` / <span class="crumb" data-act="game-go" data-dir="${esc(parts.slice(0,i+1).join('/'))}">${esc(seg)}</span>`).join('');
     const q=($('dlSearch')?$('dlSearch').value:'').trim().toLowerCase();
     const showInst=$('fltInst')?$('fltInst').checked:true;
     const showMiss=$('fltMiss')?$('fltMiss').checked:true;
     const match=(...txt)=>!q||txt.join(' ').toLowerCase().includes(q);
     const tb=$('gameTable');
-    const dirRows=j.dirs.map(d=>`<tr><td></td><td></td><td colspan="3"><span class="crumb" onclick="gameGo('${esc(curDir?curDir+'/'+d:d)}')">📁 ${esc(d)}</span></td><td></td></tr>`);
+    const dirRows=j.dirs.map(d=>`<tr><td></td><td></td><td colspan="3"><span class="crumb" data-act="game-go" data-dir="${esc(curDir?curDir+'/'+d:d)}">📁 ${esc(d)}</span></td><td></td></tr>`);
     const gameRows=j.games.map(g=>({g,cn:dlNames[g.file.replace(/\.[^.]+$/,'')]||''}))
       .filter(({g,cn})=>showInst&&match(g.name||'',g.file,cn,g.genre||'')).map(({g,cn})=>{
-      const img=g.image?`/api/media?system=${encodeURIComponent(curSys)}&path=${encodeURIComponent(g.image)}`:'';
+      const img=g.image?authUrl('/api/media?system='+encodeURIComponent(curSys)+'&path='+encodeURIComponent(g.image)):'';
       return `<tr>
       <td><input type="checkbox" class="gsel" value="${esc(g.rel)}"></td>
       <td>${img?`<img class="thumb" loading="lazy" src="${img}">`:''}</td>
       <td>${esc(cn||g.name||'')}<div class="hint">${cn?esc(g.name||'')+' · ':''}${esc(g.genre||'')} ${esc(g.players?t('players',{n:g.players}):'')}</div></td>
       <td class="mono" style="max-width:260px;overflow:hidden;text-overflow:ellipsis">${esc(g.file)}</td>
       <td>${fmtSize(g.size)}</td>
-      <td><button onclick="renameGame('${esc(g.rel)}','${esc(g.file)}')">${t('rename')}</button></td></tr>`;
+      <td><button data-act="game-rename" data-rel="${esc(g.rel)}" data-file="${esc(g.file)}">${t('rename')}</button></td></tr>`;
     });
     let missRows='', missTotal=0;
     if(lib&&showMiss){
@@ -1461,7 +1491,7 @@ async function loadGames(){
         const st=dlJob&&dlJob.files?dlJob.files[g.fn||(g.n+'.7z')]:null;
         const op=st?`<span class="hint">${Math.round(st.got/st.size*100)}%${st.done?' ✓':''}</span>`
           :dlQueued.has(g.n)?`<span class="hint">${t('dl_queued')}</span>`
-          :`<button data-n="${esc(g.n)}" onclick="dlOne(this.dataset.n)">${t('dl_btn')}</button>`;
+          :`<button data-act="dl-one" data-n="${esc(g.n)}">${t('dl_btn')}</button>`;
         return `<tr>
         <td><input type="checkbox" class="dlsel" value="${esc(g.n)}"></td>
         <td></td>
@@ -1491,6 +1521,7 @@ function uploadWithProgress(url,files,progEl,done){
   const fd=new FormData();
   for(const f of files)fd.append('file',f);
   const x=new XMLHttpRequest();x.open('POST',url);
+  if(WM_TOKEN)x.setRequestHeader('Authorization','Bearer '+WM_TOKEN);
   const bar=document.createElement('div');bar.className='prog';bar.innerHTML='<i></i>';
   const label=document.createElement('div');label.className='hint';label.textContent=t('uploading');
   progEl.appendChild(label);progEl.appendChild(bar);
@@ -1527,7 +1558,7 @@ async function loadBios(force){
       `<div class="hint" style="margin-bottom:8px">${t('missing_n',{n:j.missing.length})}</div>
       <div style="max-height:380px;overflow-y:auto"><table><tr><th>${t('th_system')}</th><th>${t('th_req_path')}</th><th>MD5</th><th>${t('th_upload')}</th></tr>
       ${j.missing.map(m=>`<tr><td>${esc(m.system)}</td><td class="mono">${esc(m.path)}</td><td class="mono hint">${esc(m.md5)}</td>
-        <td><button onclick="pickBios('${esc(m.path)}')">${t('pick_file')}</button></td></tr>`).join('')}</table></div>`
+        <td><button data-act="bios-pick" data-path="${esc(m.path)}">${t('pick_file')}</button></td></tr>`).join('')}</table></div>`
       :'<div class="tag-ok">'+t('bios_ok')+'</div>';
     $('biosTable').innerHTML=`<tr><th>${t('th_path')}</th><th>${t('th_size')}</th></tr>`+
       j.installed.map(f=>`<tr><td class="mono">${esc(f.path)}</td><td>${fmtSize(f.size)}</td></tr>`).join('');
@@ -1553,17 +1584,17 @@ async function fmGo(p){fmPath=p;try{
   const j=await api('/api/files?path='+encodeURIComponent(p));
   fmPath=j.path;
   const parts=fmPath.split('/').filter(Boolean);
-  $('fileCrumbs').innerHTML='<span class="crumb" onclick="fmGo(\'/userdata\')">userdata</span>'+
-    parts.slice(1).map((seg,i)=>` / <span class="crumb" onclick="fmGo('/${parts.slice(0,i+2).join('/')}')">${esc(seg)}</span>`).join('');
+  $('fileCrumbs').innerHTML='<span class="crumb" data-act="fm-go" data-path="/userdata">userdata</span>'+
+    parts.slice(1).map((seg,i)=>` / <span class="crumb" data-act="fm-go" data-path="${esc('/'+parts.slice(0,i+2).join('/'))}">${esc(seg)}</span>`).join('');
   $('fmTable').innerHTML=`<tr><th style="width:30px"></th><th>${t('th_name')}</th><th>${t('th_size')}</th><th>${t('th_mtime')}</th><th>${t('th_ops')}</th></tr>`+
-    (fmPath!=='/userdata'?`<tr><td></td><td colspan="4"><span class="crumb" onclick="fmGo('${esc(fmPath.split('/').slice(0,-1).join('/')||'/userdata')}')">${t('up_one')}</span></td></tr>`:'')+
+    (fmPath!=='/userdata'?`<tr><td></td><td colspan="4"><span class="crumb" data-act="fm-go" data-path="${esc(fmPath.split('/').slice(0,-1).join('/')||'/userdata')}">${t('up_one')}</span></td></tr>`:'')+
     j.entries.map(e=>`<tr>
       <td><input type="checkbox" class="fsel" value="${esc(fmPath+'/'+e.name)}"></td>
-      <td>${e.isDir?`<span class="crumb" onclick="fmGo('${esc(fmPath+'/'+e.name)}')">📁 ${esc(e.name)}</span>`:esc(e.name)}</td>
+      <td>${e.isDir?`<span class="crumb" data-act="fm-go" data-path="${esc(fmPath+'/'+e.name)}">📁 ${esc(e.name)}</span>`:esc(e.name)}</td>
       <td>${e.isDir?'':fmtSize(e.size)}</td>
       <td class="hint">${e.mtime?new Date(e.mtime*1000).toLocaleString():''}</td>
-      <td>${e.isDir?'':`<button onclick="location.href='/api/files/download?path=${encodeURIComponent(fmPath+'/'+e.name)}'">${t('download')}</button>`}
-          <button onclick="fmRename('${esc(fmPath+'/'+e.name)}','${esc(e.name)}')">${t('rename')}</button></td></tr>`).join('');
+      <td>${e.isDir?'':`<button onclick="location.href=authUrl('/api/files/download?path=${encodeURIComponent(fmPath+'/'+e.name)}')">${t('download')}</button>`}
+          <button data-act="fm-rename" data-path="${esc(fmPath+'/'+e.name)}" data-name="${esc(e.name)}">${t('rename')}</button></td></tr>`).join('');
 }catch(e){toast(e.message,1)}}
 async function fmDelete(){
   const paths=[...document.querySelectorAll('.fsel:checked')].map(c=>c.value);

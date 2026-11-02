@@ -10,15 +10,18 @@ import btlib
 import httplib
 import scraper
 import glob
+import hmac
 import io
 import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import threading
 import time
+import traceback
 import urllib.parse
 import zipfile
 import xml.etree.ElementTree as ET
@@ -90,7 +93,10 @@ def _write_json(path, obj):
 # 更新服务器单连接仅约 25 KB/s，但镜像站支持 Range 且吞吐随连接数提升，故大镜像采用分段并行下载。
 
 UPGRADE_PARTS = 12
-_UPG = {"thread": None, "cancel": threading.Event()}
+_UPG = {"thread": None, "cancel": threading.Event(),
+        # live downloader processes, killed precisely on cancel (B7)
+        # 存活的下载进程，取消时按 PID 精确终止（B7）
+        "procs": set(), "plock": threading.Lock()}
 
 
 def _curl_head(url):
@@ -151,11 +157,24 @@ def _download_ranges(url, dest, total, log):
         try:
             # --speed-* aborts stalled connections so a retry can take over
             with open(os.path.join(parts_dir, "part%03d" % idx), "ab") as out:
-                subprocess.run(["curl", "-sf", "--connect-timeout", "20",
-                                "--speed-limit", "1024", "--speed-time", "60",
-                                "-A", "batocera-upgrade",
-                                "-r", "%d-%d" % (start + have(idx), end), url],
-                               stdout=out, stderr=subprocess.DEVNULL, timeout=10800)
+                proc = subprocess.Popen(["curl", "-sf", "--connect-timeout", "20",
+                                         "--speed-limit", "1024", "--speed-time", "60",
+                                         "-A", "batocera-upgrade",
+                                         "-r", "%d-%d" % (start + have(idx), end), url],
+                                        stdout=out, stderr=subprocess.DEVNULL)
+                with _UPG["plock"]:
+                    _UPG["procs"].add(proc)
+                try:
+                    # poll so a cancel kills this exact process right away (B7)
+                    # 轮询等待，取消时立即精确终止该进程（B7）
+                    while proc.poll() is None:
+                        if _UPG["cancel"].is_set():
+                            proc.kill()
+                            break
+                        time.sleep(0.5)
+                finally:
+                    with _UPG["plock"]:
+                        _UPG["procs"].discard(proc)
         except Exception:
             pass
         return have(idx) >= want
@@ -243,10 +262,35 @@ def _du_bytes(path):
     return 0
 
 
+def _du_many(paths):
+    """{path: bytes} with ONE du process for all paths — spawning du per
+    directory made /api/backup/info take seconds on large libraries (A3/B10).
+    单个 du 进程统计多个路径的大小；此前逐目录 spawn 导致大库上接口耗时数秒。"""
+    sizes = {p: 0 for p in paths}
+    paths = [p for p in paths if os.path.exists(p)]
+    if not paths:
+        return sizes
+    try:
+        p = subprocess.run(["du", "-sb"] + paths, capture_output=True, timeout=300)
+        if p.returncode == 0:
+            for line in p.stdout.decode("utf-8", "replace").splitlines():
+                sz, _, name = line.partition("\t")
+                if name in sizes:
+                    try:
+                        sizes[name] = int(sz)
+                    except ValueError:
+                        pass
+    except Exception:
+        pass
+    return sizes
+
+
 def backup_set_sizes():
     """Per-set byte sizes for the backup UI (cached 5 min). / 各备份集合的字节大小（缓存 5 分钟）。"""
     if _BKUP_SIZE_CACHE["data"] is not None and time.time() - _BKUP_SIZE_CACHE["t"] < 300:
         return _BKUP_SIZE_CACHE["data"]
+    rels_all = [r for _, rels in BACKUP_SETS for r in rels]
+    sizes = _du_many([os.path.join(USERDATA, r) for r in rels_all])
     sets = []
     for key, rels in BACKUP_SETS:
         total, present = 0, False
@@ -254,7 +298,7 @@ def backup_set_sizes():
             p = os.path.join(USERDATA, rel)
             if os.path.exists(p):
                 present = True
-                total += _du_bytes(p)
+                total += sizes.get(p, 0)
         sets.append({"key": key, "bytes": total, "present": present})
     _BKUP_SIZE_CACHE.update({"t": time.time(), "data": sets})
     return sets
@@ -291,15 +335,40 @@ def backup_archive_sets(path, size):
         return None
 
 
+_SETS_CACHE_PATH = os.path.join(BACKUP_ROOT, ".sets-cache.json")
+
+
 def backup_list():
+    """Archive list for the backup UI. Scanning a legacy (manifest-less) tar's
+    member headers costs seconds per GB, so per-archive results are cached in a
+    sidecar json keyed by name+size+mtime.
+    备份归档列表。扫描无清单的旧归档成员头每 GB 需数秒，因此按 文件名+大小+mtime
+    把结果缓存到随附 json 中。"""
     os.makedirs(BACKUP_ROOT, exist_ok=True)
+    try:
+        with open(_SETS_CACHE_PATH, encoding="utf-8") as f:
+            cache = json.load(f)
+    except (OSError, ValueError):
+        cache = {}
+    dirty = False
     out = []
     for f in sorted(os.listdir(BACKUP_ROOT), reverse=True):
         p = os.path.join(BACKUP_ROOT, f)
-        if f.endswith(".tar") and os.path.isfile(p):
-            st = os.stat(p)
-            out.append({"name": f, "size": st.st_size, "mtime": int(st.st_mtime),
-                        "sets": backup_archive_sets(p, st.st_size)})
+        if not (f.endswith(".tar") and os.path.isfile(p)):
+            continue
+        st = os.stat(p)
+        ent = cache.get(f)
+        if not ent or ent.get("size") != st.st_size or ent.get("mtime") != int(st.st_mtime):
+            ent = {"size": st.st_size, "mtime": int(st.st_mtime),
+                   "sets": backup_archive_sets(p, st.st_size)}
+            cache[f] = ent
+            dirty = True
+        out.append({"name": f, "size": st.st_size, "mtime": int(st.st_mtime),
+                    "sets": ent["sets"]})
+    if dirty:
+        live = {e["name"] for e in out}
+        cache = {k: v for k, v in cache.items() if k in live}
+        _write_json(_SETS_CACHE_PATH, cache)
     return out
 
 
@@ -329,7 +398,7 @@ def backup_start(keys):
         proc = None
         mtmp = os.path.join(USERDATA, MANIFEST_NAME)
         try:
-            _BKUP["total"] = sum(_du_bytes(os.path.join(USERDATA, r)) for r in rels)
+            _BKUP["total"] = sum(_du_many([os.path.join(USERDATA, r) for r in rels]).values())
             free = shutil.disk_usage(USERDATA).free
             if _BKUP["total"] + 512 * 1048576 > free:
                 raise RuntimeError("not enough free space: need %d MB, have %d MB"
@@ -398,6 +467,12 @@ def backup_restore(name):
                 time.sleep(2)
             if proc.returncode != 0:
                 raise RuntimeError("tar failed (rc=%d)" % proc.returncode)
+            # the embedded manifest must not stay behind in /userdata (B11)
+            # 恢复后清理随归档解出的清单文件，避免残留在 /userdata（B11）
+            try:
+                os.remove(os.path.join(USERDATA, MANIFEST_NAME))
+            except OSError:
+                pass
             _BKUP.update(running=False, done="restored")
         except Exception as e:
             _BKUP.update(running=False, error=str(e))
@@ -735,14 +810,14 @@ def find_system(name):
     return None
 
 
-_count_cache = {}
+_count_cache = {}  # name -> (timestamp, count); TTL so externally added roms show up (B8)
 
 
 def rom_count(sysinfo):
-    """Count rom files under the system path (cached). / 统计系统目录下的 ROM 文件数（带缓存）。"""
+    """Count rom files under the system path (cached 2 min). / 统计系统目录下的 ROM 文件数（缓存 2 分钟）。"""
     cached = _count_cache.get(sysinfo["name"])
-    if cached is not None:
-        return cached
+    if cached is not None and time.time() - cached[0] < 120:
+        return cached[1]
     d = sysinfo["path"]
     if not os.path.isdir(d):
         return 0
@@ -756,7 +831,7 @@ def rom_count(sysinfo):
                     n += 1
     except OSError:
         pass
-    _count_cache[sysinfo["name"]] = n
+    _count_cache[sysinfo["name"]] = (time.time(), n)
     return n
 
 
@@ -1208,11 +1283,26 @@ def ia_login(email, password):
 
 
 def ia_auth_ok():
+    """True only when a usable, non-expired archive.org session cookie exists
+    (B12 — the old check matched a stale cookie file forever).
+    仅当存在可用且未过期的 archive.org 会话 cookie 时返回真（B12）。"""
     try:
         with open(IA_COOKIE, encoding="utf-8", errors="replace") as f:
-            return "logged-in-sig" in f.read()
+            for line in f:
+                if line.startswith("#HttpOnly_"):
+                    line = line[len("#HttpOnly_"):]
+                elif line.startswith("#"):
+                    continue
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) == 7 and parts[5] == "logged-in-sig" and parts[6] != "deleted":
+                    try:
+                        exp = int(parts[4])
+                    except ValueError:
+                        exp = 0
+                    return exp == 0 or exp > time.time()  # 0 = session cookie
     except OSError:
-        return False
+        pass
+    return False
 
 
 def dl_available(system):
@@ -1608,14 +1698,23 @@ def gamelist_upsert_entry(sys_path, rel, fields, downloads):
     _gamelist_cache.pop(gl, None)
 
 
+_missing_cache = {}  # system -> (timestamp, count); the 2.5 s UI poll must not rescan (B9)
+
+
 def scrape_status(system):
     """Scrape job state plus credential/missing counts. / 刮削任务状态以及凭据/缺失数量。"""
     st = _scrape_st(system)
     cfg = scraper.read_es_settings()
     job = st["job"]
+    ent = _missing_cache.get(system)
+    if ent is None or time.time() - ent[0] > 10:
+        missing = len(scrape_missing(system))
+        _missing_cache[system] = (time.time(), missing)
+    else:
+        missing = ent[1]
     return {"ok": True,
             "creds": bool(cfg["user"] and cfg["password"]),
-            "missing": len(scrape_missing(system)),
+            "missing": missing,
             "job": job.snapshot() if job else None,
             "log": st["log"][-6:]}
 
@@ -1650,6 +1749,27 @@ def scrape_stop(system):
         st["job"].stop()
 
 
+# ---------------- access control / 访问控制 ----------------
+# Optional shared-token auth (A1): once webmanager.token is set in
+# batocera.conf every API call must carry "Authorization: Bearer <token>"
+# (the web UI asks once and keeps it in localStorage; ?token= exists for
+# <img>/download URLs). With no token configured the panel stays open as
+# before, but POSTs must then pass a same-origin Origin/Referer check so
+# unrelated websites cannot drive the API through the user's browser (A5).
+# 可选共享令牌认证（A1）：在 batocera.conf 配置 webmanager.token 后，所有 API
+# 请求须携带令牌；未配置时面板保持开放，但 POST 需通过 Origin/Referer 同源校验，
+# 防止恶意网页借用户浏览器调用 API（A5）。
+
+class BadRequest(Exception):
+    """Client input error -> HTTP 400 instead of a 500 (B15).
+    客户端输入错误，返回 400 而非 500（B15）。"""
+
+
+def web_token():
+    """Configured access token; '' means auth is disabled. / 配置的访问令牌，空表示未启用认证。"""
+    return conf_map().get("webmanager.token", "").strip()
+
+
 # ---------------- HTTP handler / HTTP 请求处理器 ----------------
 
 class Handler(BaseHTTPRequestHandler):
@@ -1660,6 +1780,34 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
+    # ---- access control (A1/A5) / 访问控制 ----
+    def _auth_ok(self, q):
+        tok = web_token()
+        if not tok:
+            return True
+        h = self.headers.get("Authorization", "")
+        if h.startswith("Bearer ") and hmac.compare_digest(h[7:].strip(), tok):
+            return True
+        t = q.get("token", "")
+        return bool(t) and hmac.compare_digest(t, tok)
+
+    def _csrf_ok(self):
+        # A cross-site form cannot set Authorization, so a configured token
+        # already blocks CSRF; this check guards the open (token-less) mode.
+        # 跨站表单无法携带 Authorization，配置令牌后 CSRF 已被认证挡住；
+        # 此校验保护未设令牌的开放模式。
+        if web_token():
+            return True
+        host = self.headers.get("Host", "").lower()
+        for hdr in ("Origin", "Referer"):
+            val = self.headers.get(hdr)
+            if val:
+                try:
+                    return urllib.parse.urlsplit(val).netloc.lower() == host
+                except ValueError:
+                    return False
+        return True  # curl & co send neither header
+
     # ---- response helpers / 响应辅助方法 ----
     def _json(self, data, status=200):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -1667,6 +1815,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
 
@@ -1679,6 +1828,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
 
@@ -1691,22 +1842,37 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(size))
+        self.send_header("X-Content-Type-Options", "nosniff")
         if download_name:
             enc = urllib.parse.quote(download_name)
             self.send_header("Content-Disposition",
                              "attachment; filename*=UTF-8''" + enc)
-        elif inline:
-            self.send_header("Content-Disposition", "inline")
+        else:
+            # static assets (locales, logo, art) are cacheable (B14)
+            self.send_header("Cache-Control", "public, max-age=3600")
+            if inline:
+                self.send_header("Content-Disposition", "inline")
         self.end_headers()
         with open(path, "rb") as f:
             shutil.copyfileobj(f, self.wfile, 65536)
 
     def _read_json(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        if length <= 0 or length > 10 * 1024 * 1024:
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            raise BadRequest("bad Content-Length")
+        if length < 0 or length > 10 * 1024 * 1024:
+            raise BadRequest("bad Content-Length")
+        if length == 0:
             return {}
         body = self.rfile.read(length)
-        return json.loads(body.decode("utf-8"))
+        try:
+            data = json.loads(body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            raise BadRequest("invalid JSON body")
+        if not isinstance(data, dict):
+            raise BadRequest("JSON object expected")
+        return data
 
     def _drain(self):
         length = int(self.headers.get("Content-Length") or 0)
@@ -1716,34 +1882,51 @@ class Handler(BaseHTTPRequestHandler):
                 break
             length -= len(chunk)
 
+    def _client_error(self, msg, status=400):
+        """Best-effort error response; the client may already be gone. / 尽力返回错误；客户端可能已断连。"""
+        try:
+            self._error(msg, status)
+        except Exception:
+            pass
+
     # ---- routing / 路由分发 ----
     def do_GET(self):
         try:
             u = urllib.parse.urlsplit(self.path)
             path = u.path
             q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
+            # open entry points: the page itself plus its locale files and
+            # logo; everything else needs the token when one is set (A1)
+            # 开放入口：页面本身、语言文件与 logo；配置令牌后其余均须认证
+            if not (path in ("/", "/index.html") or path == "/api/logo"
+                    or path.startswith("/api/locales/")) and not self._auth_ok(q):
+                return self._error("unauthorized", 401)
             self.route_get(path, q)
-        except BrokenPipeError:
+        except (BrokenPipeError, ConnectionResetError):
             pass
-        except Exception as e:
-            try:
-                self._error(str(e), 500)
-            except Exception:
-                pass
+        except BadRequest as e:
+            self._client_error(str(e))
+        except Exception:
+            traceback.print_exc()  # full stack to server.log, generic 500 out (B3)
+            self._client_error("internal error", 500)
 
     def do_POST(self):
         try:
             u = urllib.parse.urlsplit(self.path)
             path = u.path
             q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
+            if not self._auth_ok(q):
+                return self._error("unauthorized", 401)
+            if not self._csrf_ok():
+                return self._client_error("cross-origin request rejected", 403)
             self.route_post(path, q)
-        except BrokenPipeError:
+        except (BrokenPipeError, ConnectionResetError):
             pass
-        except Exception as e:
-            try:
-                self._error(str(e), 500)
-            except Exception:
-                pass
+        except BadRequest as e:
+            self._client_error(str(e))
+        except Exception:
+            traceback.print_exc()
+            self._client_error("internal error", 500)
 
     # ================= GET 路由 =================
     def route_get(self, path, q):
@@ -1902,10 +2085,22 @@ class Handler(BaseHTTPRequestHandler):
                         else:
                             log.write("plain download: %s\n" % pre["url"])
                             log.flush()
-                            rc = subprocess.run(
+                            proc = subprocess.Popen(
                                 ["curl", "-sfL", "-A", "batocera-upgrade",
                                  "-o", dest, pre["url"]],
-                                stdout=log, stderr=subprocess.STDOUT).returncode
+                                stdout=log, stderr=subprocess.STDOUT)
+                            with _UPG["plock"]:
+                                _UPG["procs"].add(proc)
+                            try:
+                                while proc.poll() is None:
+                                    if _UPG["cancel"].is_set():
+                                        proc.kill()
+                                        break
+                                    time.sleep(0.5)
+                            finally:
+                                with _UPG["plock"]:
+                                    _UPG["procs"].discard(proc)
+                            rc = proc.returncode or 0
                             if rc:
                                 err_msg = "download failed (rc=%d)" % rc
                 except Exception as e:
@@ -1982,8 +2177,15 @@ class Handler(BaseHTTPRequestHandler):
             if not self._upgrade_running():
                 return self._error("no upgrade in progress")
             _UPG["cancel"].set()
-            subprocess.run(["pkill", "-f", "boot.tar.xz"], capture_output=True)
-            subprocess.run(["pkill", "-f", "batocera-upgrade"], capture_output=True)
+            # kill only our own downloader processes, never pkill by name (B7)
+            # 只终止本进程登记的下载进程，不再按名字 pkill 误伤其他进程（B7）
+            with _UPG["plock"]:
+                procs = list(_UPG["procs"])
+            for p in procs:
+                try:
+                    p.kill()
+                except OSError:
+                    pass
             return self._json({"ok": True})
         if path == "/api/system/clean-upgrade":
             return self.clean_upgrade()
@@ -2300,7 +2502,10 @@ class Handler(BaseHTTPRequestHandler):
             fp = safe_join("/", str(data.get("path", "")))
             if not fp.startswith(os.path.realpath(USERDATA) + os.sep):
                 return self._error("only /userdata is allowed")
-            os.makedirs(os.path.join(fp, sanitize_filename(str(data.get("name", "new")))), exist_ok=False)
+            target = os.path.join(fp, sanitize_filename(str(data.get("name", "new"))))
+            if os.path.isdir(target):
+                return self._json({"ok": True})  # already exists: be idempotent (B4)
+            os.makedirs(target)
             return self._json({"ok": True})
         self._drain()
         return self._error("not found", 404)
@@ -2425,17 +2630,13 @@ class Handler(BaseHTTPRequestHandler):
             used = total - free
         except Exception:
             total = used = free = 0
-        # Per top-level /userdata subdirs — du via subprocess for accuracy
+        # Per top-level /userdata subdirs — one du process for all of them (B10)
         breakdown = []
-        for name in sorted(os.listdir(USERDATA)):
-            p = os.path.join(USERDATA, name)
-            if not os.path.isdir(p):
-                continue
-            try:
-                out = subprocess.run(["du", "-sb", p], capture_output=True, timeout=60).stdout
-                size = int(out.split(b"\t", 1)[0]) if out else 0
-            except Exception:
-                size = 0
+        names = [n for n in sorted(os.listdir(USERDATA))
+                 if os.path.isdir(os.path.join(USERDATA, n))]
+        sizes = _du_many([os.path.join(USERDATA, n) for n in names])
+        for name in names:
+            size = sizes.get(os.path.join(USERDATA, name), 0)
             if size > 0:
                 breakdown.append({"name": name, "size": size})
         breakdown.sort(key=lambda x: -x["size"])
@@ -2810,9 +3011,22 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"path": fp, "entries": entries})
 
 
+class QuietHTTPServer(ThreadingHTTPServer):
+    """Silence traceback spam from clients vanishing mid-request (A2): every
+    browser refresh or aborted poll used to dump a full ConnectionResetError
+    stack into server.log, drowning real errors. Genuine bugs still print.
+    静默客户端中途断连的堆栈刷屏（A2）：此前每次刷新/中断轮询都会把完整的
+    ConnectionResetError 堆栈写进 server.log，淹没真实错误；真正的 bug 仍会记录。"""
+
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], OSError):
+            return  # connection reset / broken pipe / timeout — the client is gone
+        traceback.print_exc()
+
+
 def main():
     """Entry point: start the threaded HTTP server. / 入口：启动多线程 HTTP 服务器。"""
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    server = QuietHTTPServer(("0.0.0.0", PORT), Handler)
     server.daemon_threads = True
     print("Batocera Web Manager listening on port %d" % PORT, flush=True)
     server.serve_forever()

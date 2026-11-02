@@ -89,6 +89,7 @@ def _extract(archive, dest_dir, spec):
                 if not prefix and not only:
                     z.extractall(dest)
                 else:
+                    real_dest = os.path.realpath(dest)
                     for name in z.namelist():
                         rel = name
                         if prefix:
@@ -100,6 +101,12 @@ def _extract(archive, dest_dir, spec):
                         if only and rel not in only:
                             continue
                         target = os.path.join(dest, rel)
+                        # zip-slip guard (A4): a crafted member like ../../x
+                        # must never escape dest — we run as root.
+                        # zip 路径穿越防护（A4）：../../x 之类的恶意成员不得写出
+                        # dest 之外，本进程以 root 运行。
+                        if not os.path.realpath(target).startswith(real_dest + os.sep):
+                            continue
                         parent = os.path.dirname(target)
                         if parent:
                             os.makedirs(parent, exist_ok=True)

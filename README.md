@@ -94,6 +94,7 @@ Stored in `batocera.conf` (`webmanager.*` keys) / 保存在 `batocera.conf` 的 
 | `webmanager.dl_seed` | `1` | Keep seeding after download finishes | 下载完成后继续做种 |
 | `webmanager.dl_port` | `6881` | Inbound BT listen port | BT 入站监听端口 |
 | `webmanager.dl_peers` | *(empty)* | Manual peers (`ip:port`, one per line) | 手动指定 peer（每行一个 `ip:port`） |
+| `webmanager.token` | *(empty)* | Access token: when set, every browser must enter it to use the panel (sent as `Authorization: Bearer` header or `?token=` query); also blocks cross-site POSTs. Leave empty to disable. | 访问令牌：设置后每台浏览器须输入令牌才能使用面板（以 `Authorization: Bearer` 头或 `?token=` 参数携带），同时阻止跨站 POST。留空关闭。 |
 
 ---
 
