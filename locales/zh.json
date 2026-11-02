@@ -322,5 +322,17 @@
  "xml_saved": "XML 已保存",
  "dl_residue": "{n} 个下载残留（失败/中断的临时文件），共 {s}",
  "dl_clean_btn": "清理残留",
- "dl_cleaned": "已清理 {n} 个残留，释放 {s}"
+ "dl_cleaned": "已清理 {n} 个残留，释放 {s}",
+ "panel_upd_title": "面板更新",
+ "panel_upd_check": "检查更新",
+ "panel_upd_now": "立即更新",
+ "panel_upd_info": "当前：{cur} · 最新：{lat}（{date}）{msg}",
+ "panel_upd_unknown": "未知",
+ "panel_upd_available": "面板有新版本可用",
+ "panel_upd_uptodate": "面板已是最新",
+ "panel_upd_running": "正在更新面板…",
+ "panel_upd_done": "面板已更新——正在重启，页面几秒后自动刷新",
+ "panel_upd_failed": "面板更新失败：{e}",
+ "panel_upd_hint": "被替换的文件备份在 webmanager/backups/self-* 下，出问题可通过 SSH 手动恢复。",
+ "cf_panel_upd": "现在从 GitHub 更新面板？完成后面板会自行重启。"
 }

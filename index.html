@@ -243,6 +243,15 @@ input.inp.w{width:110px}
         <span class="hint" data-i18n="sec_token_hint">When set, every browser must enter this token to use the panel. Leave empty to disable.</span>
       </div>
     </div>
+    <div class="card"><h2 data-i18n="panel_upd_title">Panel Update</h2>
+      <div class="row"><span class="hint" id="panelUpdInfo">…</span></div>
+      <div class="row">
+        <button onclick="checkPanelUpdate(true)" data-i18n="panel_upd_check">Check</button>
+        <button class="primary" id="panelUpdBtn" onclick="doPanelUpdate()" data-i18n="panel_upd_now" disabled>Update Now</button>
+      </div>
+      <div class="hint" id="panelUpdStatus" style="white-space:pre-wrap;font-family:Consolas,monospace"></div>
+      <div class="hint" data-i18n="panel_upd_hint" style="margin-top:4px">Replaced files are backed up under webmanager/backups/self-*; restore manually via SSH if something breaks.</div>
+    </div>
     <div class="card"><h2 data-i18n="all_params">All Settings (batocera.conf)</h2>
       <div class="row">
         <input type="text" id="setSearch" data-i18n-ph="search_kv_ph" placeholder="Search key or value…" style="width:240px" oninput="renderSettingsTable()">
@@ -440,6 +449,13 @@ const FALLBACK_LOCALE = {
   scrape_done:'Scrape finished — found {found}, no match {notfound}, errors {errors}',
   scrape_missing:'{n} games lack metadata', scrape_all_ok:'All games have metadata',
   scrape_nocreds:'No ScreenScraper account saved — set it in the EmulationStation scraper first',
+  panel_upd_title:'Panel Update', panel_upd_check:'Check', panel_upd_now:'Update Now',
+  panel_upd_info:'Current: {cur} · Latest: {lat} ({date}) {msg}', panel_upd_unknown:'unknown',
+  panel_upd_available:'A new panel version is available', panel_upd_uptodate:'Panel is up to date',
+  panel_upd_running:'Updating panel…', panel_upd_done:'Panel updated — restarting, page will reload in a few seconds',
+  panel_upd_failed:'Panel update failed: {e}',
+  panel_upd_hint:'Replaced files are backed up under webmanager/backups/self-*; restore manually via SSH if something breaks.',
+  cf_panel_upd:'Update the panel from GitHub now? The panel restarts itself when done.',
   save:'Save'
 };
 // ---- Language state & browser language detection / 语言状态与浏览器语言检测 ----
@@ -1087,7 +1103,7 @@ async function cleanTorrent(){
 // ---------- Settings / 设置 ----------
 let confLines=[];
 async function loadSettings(){
-  loadVideo();loadAudio();loadConf();loadBackups();
+  loadVideo();loadAudio();loadConf();loadBackups();checkPanelUpdate();
 }
 async function loadVideo(){
   try{
@@ -1115,6 +1131,38 @@ async function setVol(){try{await post('/api/audio/volume',{volume:$('audVol').v
 async function toggleMute(){try{await post('/api/audio/volume',{volume:'mute-toggle'});loadAudio()}catch(e){toast(e.message,1)}}
 async function dlSaveConf(key,value){
   try{await post('/api/settings/set',{key,value});toast(t('saved'));loadConf()}catch(e){toast(e.message,1)}
+}
+// ---- panel self-update from GitHub / 面板自更新 ----
+let _puPoll=null;
+async function checkPanelUpdate(manual){
+  try{
+    const j=await api('/api/self/version');
+    const cur=j.current?j.current.slice(0,7):t('panel_upd_unknown');
+    const lat=j.latest?j.latest.slice(0,7):'?';
+    $('panelUpdInfo').textContent=t('panel_upd_info',{cur,lat,date:(j.latest_date||'').slice(0,10),msg:j.latest_msg||''});
+    $('panelUpdBtn').disabled=!j.update_available;
+    if(manual&&j.update_available)toast(t('panel_upd_available'));
+    else if(manual&&!j.error)toast(t('panel_upd_uptodate'));
+    if(j.error)$('panelUpdInfo').textContent+=' — '+j.error;
+  }catch(e){$('panelUpdInfo').textContent=e.message}
+}
+async function doPanelUpdate(){
+  if(!confirm(t('cf_panel_upd')))return;
+  try{await post('/api/self/update',{})}catch(e){toast(e.message,1);return}
+  $('panelUpdBtn').disabled=true;
+  if(_puPoll)clearInterval(_puPoll);
+  _puPoll=setInterval(async()=>{
+    let s;try{s=await api('/api/self/status')}catch(e){return}
+    if(s.running){$('panelUpdStatus').textContent=t('panel_upd_running')+(s.stage?' — '+s.stage:'');return}
+    clearInterval(_puPoll);_puPoll=null;
+    if(s.phase==='done'){
+      $('panelUpdStatus').textContent=t('panel_upd_done');
+      setTimeout(()=>location.reload(),5000);
+    }else if(s.phase==='failed'){
+      $('panelUpdStatus').textContent=t('panel_upd_failed',{e:s.error||''})+(s.tail?'\n'+s.tail:'');
+      $('panelUpdBtn').disabled=false;
+    }
+  },2000);
 }
 async function refreshIaState(){
   try{

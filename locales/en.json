@@ -322,5 +322,17 @@
  "xml_saved": "XML saved",
  "dl_residue": "{n} leftover partial-download item(s), {s} — from failed/interrupted downloads",
  "dl_clean_btn": "Clean up",
- "dl_cleaned": "Removed {n} leftover item(s), freed {s}"
+ "dl_cleaned": "Removed {n} leftover item(s), freed {s}",
+ "panel_upd_title": "Panel Update",
+ "panel_upd_check": "Check",
+ "panel_upd_now": "Update Now",
+ "panel_upd_info": "Current: {cur} · Latest: {lat} ({date}) {msg}",
+ "panel_upd_unknown": "unknown",
+ "panel_upd_available": "A new panel version is available",
+ "panel_upd_uptodate": "Panel is up to date",
+ "panel_upd_running": "Updating panel…",
+ "panel_upd_done": "Panel updated — restarting, page will reload in a few seconds",
+ "panel_upd_failed": "Panel update failed: {e}",
+ "panel_upd_hint": "Replaced files are backed up under webmanager/backups/self-*; restore manually via SSH if something breaks.",
+ "cf_panel_upd": "Update the panel from GitHub now? The panel restarts itself when done."
 }

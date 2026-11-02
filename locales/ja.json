@@ -322,5 +322,17 @@
  "xml_saved": "XML を保存しました",
  "dl_residue": "失敗/中断したダウンロードの残り {n} 件（{s}）",
  "dl_clean_btn": "クリーンアップ",
- "dl_cleaned": "{n} 件削除、{s} を解放"
+ "dl_cleaned": "{n} 件削除、{s} を解放",
+ "panel_upd_title": "パネル更新",
+ "panel_upd_check": "更新を確認",
+ "panel_upd_now": "今すぐ更新",
+ "panel_upd_info": "現在: {cur} · 最新: {lat}（{date}）{msg}",
+ "panel_upd_unknown": "不明",
+ "panel_upd_available": "パネルの新しいバージョンがあります",
+ "panel_upd_uptodate": "パネルは最新です",
+ "panel_upd_running": "パネルを更新中…",
+ "panel_upd_done": "パネル更新完了——再起動中。数秒後にページが自動リロードされます",
+ "panel_upd_failed": "パネル更新に失敗しました: {e}",
+ "panel_upd_hint": "置き換えられたファイルは webmanager/backups/self-* にバックアップされます。問題時は SSH で手動復元してください。",
+ "cf_panel_upd": "GitHub からパネルを今すぐ更新しますか？完了後パネルは自動で再起動します。"
 }

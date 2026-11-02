@@ -61,6 +61,15 @@ ssh root@<batocera-ip> "pkill -f webmanager/server.py; \
 
 ---
 
+## Panel self-update / 面板自更新
+
+* Settings → **Panel Update** checks the latest `main` commit of this repository (via the GitHub API) and can update the panel in place: it downloads the repo tarball, verifies the Python files compile, backs up every replaced file to `webmanager/backups/self-<timestamp>/`, copies the new files in, and restarts itself.
+  设置 → **面板更新** 会通过 GitHub API 检查本仓库 `main` 分支的最新提交，并可原地更新面板：下载仓库 tarball、校验 Python 文件语法、把被替换的文件备份到 `webmanager/backups/self-<时间戳>/`、写入新文件并自动重启。
+* The currently installed commit is recorded in `webmanager/.self-version`. If an update breaks something, restore the files from the backup directory over SSH and restart with `sh /userdata/system/webmanager/install.sh`.
+  当前安装的提交记录在 `webmanager/.self-version`。若更新后出现问题，可通过 SSH 将备份目录中的文件复制回去，再运行 `sh /userdata/system/webmanager/install.sh` 重启。
+
+---
+
 ## Game downloads / 游戏下载
 
 * ROM metadata lives in `gamedb/<system>/<system>.json` (+ `<system>.torrent` for BT systems).

@@ -1148,6 +1148,60 @@ MIME = {
 
 _vc_cache = {"t": 0.0, "data": None}
 
+# ---------------- panel self-update from GitHub / 面板自更新（从 GitHub） ----------------
+# The panel is a plain file tree plus install.sh, so "update" means: resolve
+# latest main sha -> download the repo tarball from codeload -> verify
+# (py_compile) -> back up replaced files into backups/self-<ts> -> copy over
+# BASE -> delayed restart via install.sh. Rollback is manual: the backup dir
+# holds every replaced file.
+# 面板就是一组纯文件加 install.sh，因此自更新流程为：解析 main 最新 sha →
+# 从 codeload 拉仓库 tarball → py_compile 校验 → 将被替换文件备份到
+# backups/self-<ts> → 覆盖 BASE → 延迟经 install.sh 重启。回滚为手动方式，
+# 备份目录保存所有被替换的文件。
+SELF_REPO = "JackieMa-1981/batocera-webmanager"
+SELF_VER_PATH = os.path.join(BASE, ".self-version")
+_SELF = {"thread": None}
+_su_cache = {"t": 0.0, "data": None}
+
+
+def _self_local_sha():
+    try:
+        with open(SELF_VER_PATH) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def self_version():
+    """Local sha vs latest GitHub main sha (remote cached 10 min).
+    本地 sha 与 GitHub main 最新 sha 对比（远端结果缓存 10 分钟）。"""
+    now = time.time()
+    if _su_cache["data"] is not None and now - _su_cache["t"] < 600:
+        remote = _su_cache["data"]
+    else:
+        remote = {"sha": "", "date": "", "msg": "", "error": ""}
+        code, out, err = run_cmd(["curl", "-sfL", "--max-time", "15", "-A", "webmanager/1.0",
+                                  "https://api.github.com/repos/%s/commits/main" % SELF_REPO],
+                                 timeout=25)
+        if code == 0:
+            try:
+                j = json.loads(out)
+                cm = j.get("commit") or {}
+                remote["sha"] = j.get("sha", "")
+                remote["date"] = (cm.get("committer") or {}).get("date", "")
+                remote["msg"] = (cm.get("message") or "").splitlines()[0]
+            except ValueError:
+                remote["error"] = "bad api response"
+        else:
+            remote["error"] = err.strip() or "unreachable"
+        if not remote["error"]:
+            _su_cache["t"] = now
+            _su_cache["data"] = remote
+    local = _self_local_sha()
+    return {"current": local, "latest": remote["sha"], "latest_date": remote["date"],
+            "latest_msg": remote["msg"], "error": remote["error"],
+            "update_available": bool(remote["sha"]) and local != remote["sha"]}
+
 
 # ---------------- BIOS check cache / BIOS 检查缓存 ----------------
 
@@ -1938,6 +1992,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(self.sys_info())
         if path == "/api/system/version-check":
             return self._json(self.version_check())
+        if path == "/api/self/version":
+            return self._json(self_version())
+        if path == "/api/self/status":
+            return self.self_status()
         if path == "/api/system/disk-usage":
             return self._json(self.disk_usage())
         if path == "/api/system/upgrade-status":
@@ -2187,6 +2245,8 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError:
                     pass
             return self._json({"ok": True})
+        if path == "/api/self/update":
+            return self.self_update()
         if path == "/api/system/clean-upgrade":
             return self.clean_upgrade()
         if path == "/api/backup/create":
@@ -2874,6 +2934,123 @@ class Handler(BaseHTTPRequestHandler):
             "boot_avail_mb": state.get("boot_avail_mb", 0),
             "boot_free_mb": self._boot_avail_mb(),
         })
+
+    def self_update(self):
+        if _SELF["thread"] is not None and _SELF["thread"].is_alive():
+            return self._error("self-update already in progress", 409)
+        if self._upgrade_running():
+            return self._error("system upgrade in progress", 409)
+
+        def worker():
+            log_path = os.path.join(TMP_DIR, "selfupdate.log")
+            state_p = os.path.join(TMP_DIR, "selfupdate.state")
+
+            def stage(name, **kw):
+                d = {"phase": "running", "stage": name}
+                d.update(kw)
+                _write_json(state_p, d)
+
+            try:
+                with open(log_path, "w") as log:
+                    stage("check")
+                    v = self_version()
+                    sha = v.get("latest", "")
+                    if not sha:
+                        raise RuntimeError("cannot resolve latest sha: %s" % (v.get("error") or "?"))
+                    if not v.get("update_available"):
+                        raise RuntimeError("already up to date")
+                    log.write("updating panel to %s (%s)\n" % (sha[:7], v.get("latest_msg", "")))
+                    stage("download", sha=sha)
+                    tgz = os.path.join(TMP_DIR, "selfupdate.tar.gz")
+                    url = "https://codeload.github.com/%s/tar.gz/%s" % (SELF_REPO, sha)
+                    rc = subprocess.run(["curl", "-sfL", "--connect-timeout", "20",
+                                         "-A", "webmanager/1.0", "-o", tgz, url],
+                                        stdout=log, stderr=subprocess.STDOUT).returncode
+                    if rc != 0:
+                        raise RuntimeError("tarball download failed (curl rc=%d)" % rc)
+                    log.write("downloaded %d bytes\n" % os.path.getsize(tgz))
+                    stage("verify", sha=sha)
+                    src = os.path.join(TMP_DIR, "selfupdate.src")
+                    shutil.rmtree(src, ignore_errors=True)
+                    os.makedirs(src)
+                    rc = subprocess.run(["tar", "-xzf", tgz, "-C", src],
+                                        stdout=log, stderr=subprocess.STDOUT).returncode
+                    if rc != 0:
+                        raise RuntimeError("tarball extract failed")
+                    roots = os.listdir(src)
+                    if len(roots) != 1:
+                        raise RuntimeError("unexpected tarball layout")
+                    root = os.path.join(src, roots[0])
+                    # refuse to install code that does not even parse
+                    # 拒绝安装语法都过不去的代码
+                    for rel in ("server.py", "btlib.py", "httplib.py", "scraper.py"):
+                        p = os.path.join(root, rel)
+                        if not os.path.exists(p):
+                            raise RuntimeError("missing %s in tarball" % rel)
+                        if subprocess.run([sys.executable, "-m", "py_compile", p],
+                                          capture_output=True).returncode != 0:
+                            raise RuntimeError("%s fails py_compile" % rel)
+                    stage("install", sha=sha)
+                    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+                    bdir = os.path.join(BACKUP_DIR, "self-" + ts)
+                    nfiles = 0
+                    for dirpath, _dirs, files in os.walk(root):
+                        rel_dir = os.path.relpath(dirpath, root)
+                        for fn in files:
+                            rel = fn if rel_dir == "." else os.path.join(rel_dir, fn)
+                            sp = os.path.join(dirpath, fn)
+                            dp = os.path.join(BASE, rel)
+                            if os.path.exists(dp):
+                                bp = os.path.join(bdir, rel)
+                                os.makedirs(os.path.dirname(bp), exist_ok=True)
+                                shutil.copy2(dp, bp)
+                            os.makedirs(os.path.dirname(dp) or BASE, exist_ok=True)
+                            shutil.copy2(sp, dp)
+                            nfiles += 1
+                    # note: files deleted upstream are not removed locally (runtime
+                    # dirs like backups/tmp must survive anyway)
+                    # 注：上游删除的文件不会在本地移除（backups/tmp 等运行目录本来就要保留）
+                    log.write("installed %d files (backup: %s)\n" % (nfiles, bdir))
+                    with open(SELF_VER_PATH, "w") as f:
+                        f.write(sha + "\n")
+                    try:
+                        os.remove(tgz)
+                    except OSError:
+                        pass
+                    shutil.rmtree(src, ignore_errors=True)
+                    _write_json(state_p, {"phase": "done", "stage": "restart", "sha": sha,
+                                          "tail": _tail(log_path, 10)})
+                    log.write("restarting panel ...\n")
+                    log.flush()
+                    time.sleep(1.5)
+                    # delayed restart so this HTTP response survives
+                    # 延迟重启，保证本次响应能返回
+                    subprocess.Popen(["sh", os.path.join(BASE, "install.sh")],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                     start_new_session=True)
+            except Exception as e:
+                _write_json(state_p, {"phase": "failed", "error": str(e),
+                                      "tail": _tail(log_path, 12)})
+
+        t = threading.Thread(target=worker, daemon=True)
+        _SELF["thread"] = t
+        t.start()
+        return self._json({"ok": True})
+
+    def self_status(self):
+        state = {}
+        try:
+            with open(os.path.join(TMP_DIR, "selfupdate.state")) as f:
+                state = json.load(f)
+        except (OSError, ValueError):
+            pass
+        running = _SELF["thread"] is not None and _SELF["thread"].is_alive()
+        tail = state.get("tail", "")
+        if running or state.get("phase") == "failed":
+            tail = _tail(os.path.join(TMP_DIR, "selfupdate.log"), 12)
+        return self._json({"running": running, "phase": state.get("phase", ""),
+                           "stage": state.get("stage", ""), "sha": state.get("sha", ""),
+                           "error": state.get("error", ""), "tail": tail})
 
     def power(self, action):
         """Delayed reboot/shutdown/ES-restart. / 延迟执行重启/关机/重启 ES。"""
