@@ -102,7 +102,7 @@ _UPG = {"thread": None, "cancel": threading.Event(),
 def _curl_head(url):
     """Follow redirects with HEAD requests; return {url, size, ranges} or None.
     用 HEAD 请求跟踪重定向，返回 {url, size, ranges}，失败返回 None。"""
-    code, out, _ = run_cmd(["curl", "-sIL", "-A", "batocera-upgrade.header", url], timeout=40)
+    code, out, _ = run_cmd(["curl", "-sIL", "-A", "webmanager/1.0", url], timeout=40)
     if code != 0:
         return None
     final, size, ranges = url, 0, False
@@ -159,7 +159,7 @@ def _download_ranges(url, dest, total, log):
             with open(os.path.join(parts_dir, "part%03d" % idx), "ab") as out:
                 proc = subprocess.Popen(["curl", "-sf", "--connect-timeout", "20",
                                          "--speed-limit", "1024", "--speed-time", "60",
-                                         "-A", "batocera-upgrade",
+                                         "-A", "webmanager/1.0",
                                          "-r", "%d-%d" % (start + have(idx), end), url],
                                         stdout=out, stderr=subprocess.DEVNULL)
                 with _UPG["plock"]:
@@ -2074,7 +2074,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     with open(os.path.join(TMP_DIR, "upgrade.log"), "w") as log:
                         # md5 sidecar lets batocera-upgrade verify the image
-                        run_cmd(["curl", "-sfL", "-A", "batocera-upgrade.md5",
+                        run_cmd(["curl", "-sfL", "-A", "webmanager/1.0",
                                  "-o", dest + ".md5", pre["url"] + ".md5"], timeout=60)
                         info = _curl_head(pre["url"])
                         if info and info["ranges"] and info["size"] > 64 * 1048576:
@@ -2086,7 +2086,7 @@ class Handler(BaseHTTPRequestHandler):
                             log.write("plain download: %s\n" % pre["url"])
                             log.flush()
                             proc = subprocess.Popen(
-                                ["curl", "-sfL", "-A", "batocera-upgrade",
+                                ["curl", "-sfL", "-A", "webmanager/1.0",
                                  "-o", dest, pre["url"]],
                                 stdout=log, stderr=subprocess.STDOUT)
                             with _UPG["plock"]:
@@ -2576,7 +2576,7 @@ class Handler(BaseHTTPRequestHandler):
             # batocera.version sidecar instead.
             url = "%s/%s/%s/last/batocera.version" % (base, board, ch)
             c, out, err = run_cmd(["curl", "-sfL", "--max-time", "15",
-                                   "-A", "batocera-upgrade.check", url], timeout=25)
+                                   "-A", "webmanager/1.0", url], timeout=25)
             parts = out.strip().split(None, 1)
             channels[ch] = {"version": parts[0] if c == 0 and parts else "",
                             "date": parts[1] if c == 0 and len(parts) > 1 else "",
@@ -2687,7 +2687,12 @@ class Handler(BaseHTTPRequestHandler):
         t = _UPG.get("thread")
         if t is not None and t.is_alive():
             return True
-        return subprocess.run(["pgrep", "-f", "batocera-upgrade"],
+        # anchor the match: a bare "batocera-upgrade" also matches our own curl
+        # children when their args contain that string (old UA), causing the UI
+        # to show a phantom "upgrading" state. Trailing space/EOL required.
+        # 锚定匹配：裸串会命中参数里含该串的本进程 curl 子进程（旧 UA），
+        # 导致前端误显示"升级中"。要求后跟空格或行尾。
+        return subprocess.run(["pgrep", "-f", "batocera-upgrade( |$)"],
                               capture_output=True).returncode == 0
 
     def _upgrade_begin(self, state):
@@ -2807,7 +2812,7 @@ class Handler(BaseHTTPRequestHandler):
         base = (conf_map().get("updates.url") or "https://updates.batocera.org").rstrip("/")
         url = "%s/%s/%s/last/boot.tar.xz" % (base, board, channel)
         size = 0
-        code, out, _ = run_cmd(["curl", "-sfIL", "-A", "batocera-upgrade.header", url], timeout=40)
+        code, out, _ = run_cmd(["curl", "-sfIL", "-A", "webmanager/1.0", url], timeout=40)
         if code == 0:
             for line in out.splitlines():
                 if line.lower().startswith("content-length:"):

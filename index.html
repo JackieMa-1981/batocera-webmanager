@@ -918,7 +918,8 @@ async function doUpgradeLocal(){
 }
 async function cancelUpgrade(){
   if(!confirm(t('cf_upgrade_cancel')))return;
-  try{await post('/api/system/upgrade-cancel',{});toast(t('done'));}
+  try{await post('/api/system/upgrade-cancel',{});toast(t('done'));
+    if(_upPoll){clearInterval(_upPoll);_upPoll=null}_upgBtns(false);}
   catch(e){toast(e.message,1)}
 }
 function _upgBtns(dis){
@@ -965,7 +966,16 @@ function pollUpgrade(){
       clearInterval(_upPoll);_upPoll=null;_dlPrev=null;
       $('upgradeStatus').textContent=t('upgrade_done');
       _upgBtns(false);
+      return;
     }
+    // stale poll: nothing is running and no terminal phase exists (the poll was
+    // started on a false positive) — stop polling and restore the UI, otherwise
+    // the card would show "updating" forever with no way to cancel.
+    // 过期轮询：服务端确认无升级且无终态（轮询由误报启动）——停止轮询并还原界面，
+    // 否则卡片会永远显示"更新中"且无法取消。
+    clearInterval(_upPoll);_upPoll=null;_dlPrev=null;
+    $('upgradeStatus').textContent='';
+    _upgBtns(false);
   },3000);
 }
 // ---------- Backup & Restore / 备份与还原 ----------
