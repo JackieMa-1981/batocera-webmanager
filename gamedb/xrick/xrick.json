@@ -1,0 +1,1 @@
+{"system":"xrick","source":"batocera-store: ports-xrick-1.0.0-1-any.pkg.tar.zst","http":{"base":"https://store.batocera.org/"},"games":[{"n":"xrick-data","f":"ports-xrick-1.0.0-1-any.pkg.tar.zst","s":3643223,"t":"XRick","r":"World","fn":"ports-xrick-1.0.0-1-any.pkg.tar.zst","extract":{"fmt":"tar","prefix":"userdata/roms/xrick/"}}]}

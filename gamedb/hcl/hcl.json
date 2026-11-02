@@ -1,0 +1,1 @@
+{"system":"hcl","source":"batocera-store: ports-hcl-1.0.0-2-any.pkg.tar.zst","http":{"base":"https://store.batocera.org/"},"games":[{"n":"hcl","f":"ports-hcl-1.0.0-2-any.pkg.tar.zst","s":27573854,"t":"Hydra Castle Labyrinth","r":"World","fn":"ports-hcl-1.0.0-2-any.pkg.tar.zst","extract":{"fmt":"tar","prefix":"userdata/roms/hcl/"}}]}

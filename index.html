@@ -1,0 +1,1669 @@
+<!DOCTYPE html>
+<!--
+  Batocera Manager: single-file web admin panel (HTML + CSS + JS) for a Batocera retro-gaming box.
+  Features: dashboard (system info, online upgrade, disk, power), video/audio/WiFi settings,
+  gamepad mapping viewer, emulator & game library with BT/HTTP downloads and scraping,
+  BIOS check, file manager and user-data backup. All UI logic lives in the <script> at the bottom.
+
+  Batocera 管理面板：Batocera 复古游戏主机的单文件 Web 管理界面（HTML + CSS + JS）。
+  功能：仪表盘（系统信息、在线升级、磁盘、电源）、视频/音频/WiFi 设置、
+  手柄映射查看、带 BT/HTTP 下载与刮削的游戏库、BIOS 检查、文件管理与用户数据备份。
+  全部界面逻辑位于文件底部的 <script> 中。
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="/api/logo">
+<title>Batocera Manager</title>
+<style>
+:root{--bg:#14171c;--panel:#1c2129;--panel2:#232936;--border:#2e3542;--fg:#dfe6ee;--dim:#8b96a5;--accent:#4da3ff;--ok:#3fbf6f;--warn:#e6a23c;--danger:#e0564b;--radius:8px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--fg);font:14px/1.6 "Microsoft YaHei","PingFang SC",sans-serif;display:flex;height:100vh;overflow:hidden}
+#side{width:190px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+#side h1{font-size:16px;padding:16px 14px 10px;color:var(--accent)}
+#side .ver{font-size:11px;color:var(--dim);padding:0 14px 12px;border-bottom:1px solid var(--border)}
+#side nav{flex:1;overflow-y:auto;padding:8px 0}
+#side nav button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--fg);padding:10px 16px;cursor:pointer;font-size:14px;border-left:3px solid transparent}
+#side nav button:hover{background:var(--panel2)}
+#side nav button.on{border-left-color:var(--accent);background:var(--panel2);color:var(--accent)}
+#main{flex:1;overflow-y:auto;padding:18px 22px}
+.tab{display:none}
+.tab.on{display:block}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px}
+.card h2{font-size:15px;margin-bottom:12px;color:var(--accent)}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+label{color:var(--dim);font-size:13px}
+select,input[type=text],input[type=password],input[type=number],textarea{background:var(--bg);border:1px solid var(--border);color:var(--fg);border-radius:6px;padding:6px 10px;font-size:13px;outline:none}
+select:focus,input:focus,textarea:focus{border-color:var(--accent)}
+button{background:var(--panel2);border:1px solid var(--border);color:var(--fg);border-radius:6px;padding:6px 14px;cursor:pointer;font-size:13px}
+button:hover{border-color:var(--accent);color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#0d1117;font-weight:600}
+button.danger{border-color:var(--danger);color:var(--danger)}
+button.danger:hover{background:var(--danger);color:#fff}
+button:disabled{opacity:.5;cursor:not-allowed}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;vertical-align:middle}
+th{color:var(--dim);font-weight:400;position:sticky;top:0;background:var(--panel)}
+tr:hover td{background:var(--panel2)}
+.grid{display:grid;gap:12px}
+.grid.c4{grid-template-columns:repeat(auto-fill,minmax(180px,1fr))}
+.stat{background:var(--panel2);border-radius:var(--radius);padding:12px}
+.stat .v{font-size:20px;font-weight:600}
+.stat .k{color:var(--dim);font-size:12px}
+.bar{height:6px;background:var(--bg);border-radius:3px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:var(--accent);transition:width .3s}
+#toast{position:fixed;top:16px;right:16px;z-index:99;display:flex;flex-direction:column;gap:8px}
+.toast{background:var(--panel2);border:1px solid var(--accent);border-radius:6px;padding:10px 16px;font-size:13px;max-width:360px;box-shadow:0 4px 16px #0008}
+.toast.err{border-color:var(--danger);color:var(--danger)}
+.split{display:flex;gap:16px;align-items:flex-start}
+.syslist{width:300px;flex-shrink:0;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);display:flex;flex-direction:column;max-height:calc(100vh - 60px)}
+.syslist .items{overflow-y:auto;flex:1}
+.syslist .item{padding:8px 12px;cursor:pointer;display:flex;justify-content:space-between;border-bottom:1px solid var(--border);font-size:13px}
+.syslist .item:hover{background:var(--panel2)}
+.syslist .item.on{background:var(--panel2);color:var(--accent);border-left:3px solid var(--accent)}
+.syslist .cnt{color:var(--dim);font-size:12px}
+.type-filter{position:relative;padding:8px 10px 0}
+.type-filter .tf-btn{width:100%;text-align:left;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;cursor:pointer;font-size:13px;color:var(--fg);display:flex;justify-content:space-between;align-items:center}
+.type-filter .tf-btn:hover{border-color:var(--accent)}
+.type-filter .tf-btn .tf-cnt{color:var(--accent);font-weight:600}
+.type-filter .tf-panel{display:none;position:absolute;top:100%;left:10px;right:10px;background:var(--panel);border:1px solid var(--accent);border-radius:8px;padding:10px;z-index:50;max-height:360px;overflow-y:auto;box-shadow:0 8px 24px #0008}
+.type-filter .tf-panel.open{display:block}
+.type-filter .tf-actions{display:flex;gap:8px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.type-filter .tf-actions button{flex:1;padding:4px 8px;font-size:12px}
+.type-filter .tf-opt{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:4px;cursor:pointer;font-size:13px}
+.type-filter .tf-opt:hover{background:var(--panel2)}
+.type-filter .tf-opt input{margin:0;cursor:pointer}
+.type-filter .tf-opt .tf-n{color:var(--dim);font-size:12px;margin-left:auto}
+.sysdetail{flex:1;min-width:0}
+.thumb{width:52px;height:40px;object-fit:contain;background:#000;border-radius:4px}
+.drop{border:2px dashed var(--border);border-radius:var(--radius);padding:18px;text-align:center;color:var(--dim);margin-bottom:12px;transition:.2s}
+.drop.over{border-color:var(--accent);color:var(--accent);background:#4da3ff11}
+.prog{height:5px;background:var(--bg);border-radius:3px;overflow:hidden;margin:4px 0 8px}
+.prog i{display:block;height:100%;background:var(--ok);width:0}
+.pill{display:inline-block;background:var(--panel2);border-radius:10px;padding:1px 8px;font-size:11px;color:var(--dim);margin-left:6px}
+.mono{font-family:Consolas,monospace;font-size:12px}
+textarea.raw{width:100%;min-height:380px;font-family:Consolas,monospace;font-size:12px;line-height:1.5}
+.kv-key{color:var(--accent)}
+.tag-ok{color:var(--ok)}
+.tag-warn{color:var(--warn)}
+.tag-danger{color:var(--danger)}
+.crumb{cursor:pointer;color:var(--accent)}
+.crumb:hover{text-decoration:underline}
+.hint{font-size:12px;color:var(--dim)}
+.dev-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dev-head .name{font-weight:600}
+input.inp{width:70px;padding:3px 6px;font-size:12px}
+input.inp.w{width:110px}
+.loading{color:var(--dim);padding:20px;text-align:center}
+/* Gamepad overlay UI */
+.pad-head{display:flex;gap:18px;align-items:flex-start;margin:12px 0 8px;flex-wrap:wrap}
+.pad-overlay-wrap{position:relative;width:252px;height:302px;flex:0 0 auto}
+.pad-overlay-wrap img{width:100%;height:100%;object-fit:contain;display:block;background:#fff;border-radius:8px}
+.pad-btn-label{position:absolute;transform:translate(-50%,-50%);background:rgba(13,17,23,.92);color:var(--accent);border:1px solid var(--accent);font-size:10px;font-weight:600;line-height:15px;padding:0 4px;border-radius:3px;white-space:nowrap;pointer-events:none;box-shadow:0 1px 2px #000a}
+.pad-btn-label.is-axis{color:var(--warn);border-color:var(--warn)}
+.pad-controls{flex:1;min-width:200px}
+.pad-controls label{display:block;margin-bottom:4px}
+/* Built-in controller drawings (arcade stick / keyboard) */
+.pad-overlay-wrap.is-svg{width:100%;max-width:460px;height:auto}
+.pad-overlay-wrap.is-svg svg{display:block;width:100%;height:auto}
+.pad-overlay-wrap.is-kb{width:100%;max-width:690px;height:auto}
+.kb{display:flex;gap:10px;align-items:flex-start;background:#1b2029;border:1px solid var(--border);border-radius:10px;padding:8px}
+.kb-side{display:flex;flex-direction:column;gap:4px;flex:1}
+.kb-row{display:flex;gap:4px}
+.kb-cap{position:relative;height:29px;border:1px solid var(--border);border-radius:5px;background:#232936;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--dim);flex:0 0 auto}
+.kb-cap.on{border-color:var(--accent);background:#4da3ff1a;color:var(--fg)}
+.kb-cap .fn{position:absolute;top:0;right:1px;font-size:8px;line-height:10px;font-weight:700;color:var(--accent)}
+/* Disk card */
+.torrent-list{max-height:200px;overflow-y:auto;font-family:Consolas,monospace;font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px}
+.sys-head{display:flex;gap:16px;align-items:center;margin-bottom:6px}
+.sys-head img{width:80px;height:80px;object-fit:cover;background:#0d1117;border-radius:8px;flex-shrink:0}
+.sys-head .meta{flex:1;min-width:0}
+.dl-flt{display:flex;gap:16px;align-items:center;flex-shrink:0}
+.dl-flt label{display:flex;gap:6px;align-items:center;color:var(--fg);cursor:pointer}
+.dl-status{font-size:12px;color:var(--dim);white-space:pre-wrap;font-family:Consolas,monospace;margin:0 0 6px}
+.dl-status .bar{height:6px;background:var(--bg);border-radius:3px;overflow:hidden;margin-bottom:4px}
+</style>
+</head>
+<body>
+<!-- Sidebar: title, language selector and tab navigation / 侧边栏：标题、语言选择与标签导航 -->
+<div id="side">
+  <h1 data-i18n="title">Batocera Manager</h1>
+  <div class="ver" id="sideVer">Connecting…</div>
+  <div style="padding:0 14px 10px;border-bottom:1px solid var(--border)">
+    <select id="langSel" style="width:100%" onchange="setLang(this.value)">
+      <option value="zh">简体中文</option>
+      <option value="zh_TW">繁體中文</option>
+      <option value="en">English</option>
+      <option value="ja">日本語</option>
+      <option value="ko">한국어</option>
+    </select>
+  </div>
+  <nav id="nav">
+    <button data-tab="dash" class="on" data-i18n="nav_dash">Dashboard</button>
+    <button data-tab="settings" data-i18n="nav_settings">Settings</button>
+    <button data-tab="pads" data-i18n="nav_pads">Gamepads</button>
+    <button data-tab="games" data-i18n="nav_games">Emulators &amp; Games</button>
+    <button data-tab="bios" data-i18n="nav_bios">BIOS</button>
+    <button data-tab="files" data-i18n="nav_files">File Manager</button>
+    <button data-tab="backup" data-i18n="nav_backup">Backup</button>
+  </nav>
+</div>
+<!-- Main content area: one .tab container per page / 主内容区：每个页面对应一个 .tab 容器 -->
+<div id="main">
+
+  <!-- Dashboard / 仪表盘 -->
+  <div class="tab on" id="tab-dash">
+    <div class="card"><h2 data-i18n="sys_info">System Info</h2><div class="grid c4" id="dashGrid"><div class="loading" data-i18n="loading">Loading…</div></div></div>
+    <div class="card"><h2 data-i18n="version_card">Batocera Version</h2>
+      <div class="grid c4" id="verGrid"><div class="loading" data-i18n="checking">Checking…</div></div>
+      <div class="row" style="margin-top:10px">
+        <button class="primary" onclick="doUpgrade('stable')" data-i18n="upgrade_stable">Update to Latest Stable</button>
+        <button onclick="doUpgrade('butterfly')" data-i18n="upgrade_butterfly">Update to Latest Butterfly</button>
+        <button onclick="doUpgradeLocal()" data-i18n="upgrade_local">Install Downloaded Package</button>
+        <button class="danger" onclick="cancelUpgrade()" data-i18n="upgrade_cancel">Cancel</button>
+        <button onclick="checkVersions(true)" data-i18n="refresh">Refresh</button>
+        <span class="hint" data-i18n="upgrade_hint">Upgrading reboots the system automatically — save progress first.</span>
+      </div>
+      <div class="hint" data-i18n="upgrade_local_hint" style="margin-top:4px">Too slow? Fetch boot.tar.xz via BT or a PC download manager, copy it to \\BATOCERA\share\system\upgrade, then "Install Downloaded Package".</div>
+      <div class="hint" id="upgradeStatus" style="white-space:pre-wrap;margin-top:6px;font-family:Consolas,monospace"></div>
+    </div>
+    <div class="card"><h2 data-i18n="disk_card">Disk Usage</h2>
+      <div class="grid c4" id="diskGrid"><div class="loading" data-i18n="loading">Loading…</div></div>
+      <div class="row" style="margin-top:10px">
+        <button class="primary" onclick="cleanTorrent()" data-i18n="clean_upgrade_btn">Clean Old Boot Tarballs</button>
+        <button onclick="loadDash()" data-i18n="refresh">Refresh</button>
+        <span class="hint" data-i18n="clean_upgrade_desc">Transmission BT keeps boot-*.tar.xz files after upgrades.</span>
+      </div>
+      <div id="torrentBox" style="margin-top:6px"></div>
+    </div>
+    <div class="card"><h2 data-i18n="power_ops">Power</h2>
+      <div class="row">
+        <button class="primary" onclick="power('es_restart')" data-i18n="es_restart">Restart ES Frontend</button>
+        <button class="danger" onclick="power('reboot')" data-i18n="reboot">Reboot</button>
+        <button class="danger" onclick="power('shutdown')" data-i18n="shutdown">Shutdown</button>
+      </div>
+      <div class="hint" data-i18n="power_hint">After changing settings, click "Restart ES Frontend" to apply them — no full reboot needed.</div>
+    </div>
+  </div>
+
+  <!-- Settings / 设置 -->
+  <div class="tab" id="tab-settings">
+    <div class="card"><h2 data-i18n="video">Video</h2>
+      <div class="row"><label data-i18n="output">Output</label><select id="vidOutput"></select><button onclick="applyOutput()" data-i18n="apply">Apply</button></div>
+      <div class="row"><label data-i18n="res_mode">Resolution Mode</label><select id="vidMode" style="min-width:280px"></select><button onclick="applyMode()" data-i18n="apply_now">Apply (immediate)</button></div>
+      <div class="hint"><span data-i18n="cur_output">Current output:</span> <span id="vidCur"></span>　<span data-i18n="cur_mode">Current mode:</span> <span id="vidCurMode" class="mono"></span><br><span data-i18n="video_warn">Note: selecting a mode your display does not support may cause a black screen. If that happens, recover in ES or change back from this page.</span></div>
+    </div>
+    <div class="card"><h2 data-i18n="audio">Audio</h2>
+      <div class="row"><label data-i18n="audio_dev">Output Device</label><select id="audDev" style="min-width:320px"></select><button onclick="applyAudio()" data-i18n="apply">Apply</button></div>
+      <div class="row"><label data-i18n="volume">Volume</label><input type="range" id="audVol" min="0" max="100" style="width:220px" oninput="document.getElementById('audVolV').textContent=this.value"><span id="audVolV">0</span>
+        <button onclick="setVol()" data-i18n="set">Set</button><button id="audMuteBtn" onclick="toggleMute()" data-i18n="mute_toggle">Toggle Mute</button></div>
+    </div>
+    <div class="card"><h2>WiFi</h2>
+      <div class="row"><label data-i18n="enable">Enable</label><input type="checkbox" id="wifiEn"></div>
+      <div class="row"><label>SSID</label><input type="text" id="wifiSsid" style="width:220px"></div>
+      <div class="row"><label data-i18n="password">Password</label><input type="text" id="wifiKey" style="width:220px"></div>
+      <div class="row"><button onclick="saveWifi()" data-i18n="save_wifi">Save WiFi Settings</button><span class="hint" data-i18n="wifi_hint">Reboot required to take effect (the active connection will drop — edit with caution)</span></div>
+    </div>
+    <div class="card"><h2 data-i18n="dl_src_title">Download Sources</h2>
+      <div class="row"><label>archive.org</label>
+        <span id="iaState2" class="hint">…</span>
+        <input type="text" id="iaEmail2" data-i18n-ph="dl_ia_email_ph" placeholder="archive.org email" style="width:200px">
+        <input type="password" id="iaPass2" data-i18n-ph="dl_ia_pass_ph" placeholder="password" style="width:150px">
+        <button id="iaLoginBtn2" onclick="iaLoginGo()" data-i18n="dl_ia_login">Log in</button>
+        <button id="iaLogoutBtn2" onclick="iaLogoutGo()" style="display:none" data-i18n="dl_ia_logout">Log out</button>
+      </div>
+      <div class="hint" style="margin-bottom:8px" data-i18n="dl_ia_hint">One login shared by all disc systems (Saturn / PSX / PS2). Free signup at archive.org.</div>
+      <div class="row"><label data-i18n="dl_proxy_lbl">HTTP Proxy</label>
+        <input type="text" id="dlProxyIn" style="width:260px" placeholder="http://192.168.1.10:7890">
+        <button onclick="dlSaveConf('webmanager.dl_proxy',$('dlProxyIn').value.trim())" data-i18n="save">Save</button>
+        <span class="hint" data-i18n="dl_proxy_hint2">Required for archive.org (disc downloads) on some networks</span>
+      </div>
+      <div class="row"><label data-i18n="dl_peers_lbl">Manual BT Peers</label>
+        <input type="text" id="dlPeersConf" style="width:300px" placeholder="192.168.1.10:6881">
+        <button onclick="dlSaveConf('webmanager.dl_peers',$('dlPeersConf').value.trim())" data-i18n="save">Save</button>
+        <span class="hint" data-i18n="dl_peers_hint2">Applied to every BT download (e.g. a PC seeding on your LAN)</span>
+      </div>
+      <div class="row"><label data-i18n="dl_upload_lbl">BT Upload</label>
+        <input type="checkbox" id="dlUploadEn" onchange="dlSaveConf('webmanager.dl_upload',this.checked?'1':'0')">
+        <span class="hint" data-i18n="dl_upload_hint">Share downloaded pieces back to other peers (default on)</span>
+      </div>
+      <div class="row"><label data-i18n="dl_seed_lbl">BT Seeding</label>
+        <input type="checkbox" id="dlSeedEn" onchange="dlSaveConf('webmanager.dl_seed',this.checked?'1':'0')">
+        <span class="hint" data-i18n="dl_seed_hint">Keep seeding after a download finishes so other devices can fetch from this one (default on)</span>
+      </div>
+      <div class="row"><label data-i18n="dl_port_lbl">BT Listen Port</label>
+        <input type="number" id="dlPortIn" style="width:90px" placeholder="6881">
+        <button onclick="dlSaveConf('webmanager.dl_port',$('dlPortIn').value.trim()||'6881')" data-i18n="save">Save</button>
+        <span class="hint" data-i18n="dl_port_hint">Inbound peer connections (forward it on your router for better swarm connectivity; default 6881)</span>
+      </div>
+    </div>
+    <div class="card"><h2 data-i18n="all_params">All Settings (batocera.conf)</h2>
+      <div class="row">
+        <input type="text" id="setSearch" data-i18n-ph="search_kv_ph" placeholder="Search key or value…" style="width:240px" oninput="renderSettingsTable()">
+        <button onclick="addSettingRow()" data-i18n="add_param">Add</button>
+        <button class="primary" onclick="saveSettings()" data-i18n="save_all">Save All</button>
+        <button onclick="toggleRawConf()" data-i18n="raw_edit">Raw Text Edit</button>
+        <select id="confBackups" style="margin-left:auto"></select>
+        <button onclick="restoreConf()" data-i18n="restore_backup">Restore Backup</button>
+      </div>
+      <div id="confTableWrap" style="max-height:420px;overflow-y:auto"><table id="confTable"></table></div>
+      <textarea class="raw" id="confRaw" style="display:none"></textarea>
+    </div>
+  </div>
+
+  <!-- Gamepads / 手柄 -->
+  <div class="tab" id="tab-pads">
+    <div class="card"><h2><span data-i18n="pads_title">Configured Gamepads</span> <span class="hint" data-i18n="pads_readonly">(read-only view — edit mappings in ES: Main Menu → Controller Settings)</span></h2>
+      <div class="row">
+        <button onclick="toggleRawInput()" data-i18n="view_xml">View Raw XML</button>
+        <select id="inputBackups"></select>
+        <button onclick="restoreInput()" data-i18n="restore_backup">Restore Backup</button>
+      </div>
+      <div id="padList"></div>
+      <div id="padRawWrap" style="display:none"><textarea class="raw" id="padRaw" readonly></textarea></div>
+    </div>
+  </div>
+
+  <!-- Emulators & Games / 模拟器与游戏 -->
+  <div class="tab" id="tab-games">
+    <div class="split">
+      <div class="syslist">
+        <div class="type-filter">
+          <button class="tf-btn" onclick="toggleTypePanel(event)">
+            <span data-i18n="filter_by_type">Filter by type</span>
+            <span class="tf-cnt" id="tfCount">0</span>
+          </button>
+          <div class="tf-panel" id="tfPanel">
+            <div class="tf-actions">
+              <button onclick="setTypesAll(true)" data-i18n="select_all">All</button>
+              <button onclick="setTypesAll(false)" data-i18n="clear_all">Clear</button>
+            </div>
+            <div id="tfOpts"></div>
+          </div>
+        </div>
+        <div style="padding:10px"><input type="text" id="sysSearch" data-i18n-ph="search_sys_ph" placeholder="Search systems…" style="width:100%" oninput="renderSysList()"></div>
+        <div class="items" id="sysItems"><div class="loading" data-i18n="loading">Loading…</div></div>
+      </div>
+      <div class="sysdetail" id="sysDetail"><div class="card"><div class="loading" data-i18n="pick_sys">← Select a system</div></div></div>
+    </div>
+  </div>
+
+  <!-- BIOS -->
+  <div class="tab" id="tab-bios">
+    <div class="card"><h2><span data-i18n="bios_missing">Missing BIOS</span><button style="margin-left:10px" onclick="loadBios(true)" data-i18n="recheck">Re-check</button></h2>
+      <div id="biosMissing"><div class="loading" data-i18n="checking">Checking…</div></div>
+    </div>
+    <div class="card"><h2 data-i18n="bios_installed">Installed BIOS Files (/userdata/bios)</h2>
+      <div class="row"><button onclick="document.getElementById('biosFile').click()" data-i18n="upload_bios">Upload BIOS to /userdata/bios</button>
+      <input type="file" id="biosFile" multiple style="display:none" onchange="uploadBiosFiles(this)"></div>
+      <div style="max-height:380px;overflow-y:auto"><table id="biosTable"></table></div>
+    </div>
+  </div>
+
+  <!-- File Manager / 文件管理 -->
+  <div class="tab" id="tab-files">
+    <div class="card"><h2 data-i18n="fm_title">File Manager (/userdata)</h2>
+      <div class="row"><span id="fileCrumbs"></span></div>
+      <div class="row">
+        <button onclick="document.getElementById('fmFile').click()" data-i18n="upload_here">Upload to Current Folder</button>
+        <input type="file" id="fmFile" multiple style="display:none" onchange="fmUpload(this)">
+        <button onclick="fmMkdir()" data-i18n="new_folder">New Folder</button>
+        <button class="danger" onclick="fmDelete()" data-i18n="del_selected">Delete Selected</button>
+      </div>
+      <div class="drop" id="fmDrop" data-i18n="drop_files">Drag &amp; drop files here to upload</div>
+      <div id="fmProg"></div>
+      <div style="max-height:460px;overflow-y:auto"><table id="fmTable"></table></div>
+    </div>
+  </div>
+
+  <!-- Backup & Restore / 备份与还原 -->
+  <div class="tab" id="tab-backup">
+    <div class="card"><h2 data-i18n="bk_title">User Data Backup</h2>
+      <div class="hint" data-i18n="bk_hint" style="margin-bottom:8px">Backs up only user data: games, saves, BIOS, configs, cheats and media.</div>
+      <div class="row" id="bkSets"></div>
+      <div class="row">
+        <button class="primary" onclick="startBackup()" data-i18n="bk_start">Start Backup</button>
+        <button class="danger" onclick="cancelBackup()" data-i18n="upgrade_cancel">Cancel</button>
+      </div>
+      <div class="hint" id="bkStatus" style="white-space:pre-wrap;margin-top:6px;font-family:Consolas,monospace"></div>
+    </div>
+    <div class="card"><h2 data-i18n="bk_files">Backup Archives</h2>
+      <div class="hint" data-i18n="bk_files_hint" style="margin-bottom:8px"></div>
+      <table id="bkTable"></table>
+    </div>
+  </div>
+
+</div>
+<!-- Toast notification container / 右上角提示消息容器 -->
+<div id="toast"></div>
+
+<script>
+// ---------- i18n / 多语言与界面文案 ----------
+// Minimal built-in fallback — full translations loaded from /api/locales/<lang>.json. / 内置兜底文案，完整翻译从接口加载
+const FALLBACK_LOCALE = {
+  title:'Batocera Manager', connecting:'Connecting…', loading:'Loading…',
+  nav_dash:'Dashboard', nav_settings:'Settings', nav_pads:'Gamepads',
+  nav_games:'Emulators & Games', nav_bios:'BIOS', nav_files:'File Manager',
+  sys_info:'System Info', power_ops:'Power', version_card:'Batocera Version',
+  d_hostname:'Hostname', d_uptime:'Uptime', d_load:'Load', d_mem:'Memory',
+  d_disk:'Disk', d_es_status:'EmulationStation', d_running:'Running', d_stopped:'Stopped',
+  disk_card:'Disk Usage', done:'Done', checking:'Checking…',
+  pads_title:'Configured Gamepads', pads_hint:'(order = player 1/2/3… order; auto-backup before saving; takes effect after ES restart)',
+  pads_warn:'Warning: wrong mappings can make gamepads unusable in ES — restore a backup if that happens',
+  save_all_changes:'Save All Changes', raw_xml:'Raw XML Edit', restore_backup:'Restore Backup',
+  save_xml:'Save XML', player:'Player {n}', move_up:'Up', move_down:'Down',
+  th_func:'Function', th_type:'Type', th_value:'Value', th_code:'code', th_btns:'Button',
+  add_map:'Add Mapping', del_pad:'Delete This Gamepad',
+  cf_del_pad:'Delete all mappings of this gamepad?',
+  cf_save_pads:'Save gamepad mappings? (auto-backup; takes effect after ES restart)',
+  xml_saved:'XML saved', cf_restore_input:'Overwrite the current gamepad config with backup {f}?',
+  restored:'Restored', err_pads:'Gamepad read: ',
+  pad_type:'Controller Type', overlay_hint:'Pick a controller type to display its button layout.',
+  pads_readonly:'(read-only view — edit mappings in ES: Main Menu → Controller Settings)',
+  view_xml:'View Raw XML',
+  pad_ps:'Sony PlayStation', pad_xbox:'Xbox', pad_nintendo:'Nintendo', pad_steam:'Steam Controller',
+  bad_key:'Unknown key name',
+  pad_arcade:'Arcade Stick (12 buttons)', pad_keyboard:'Keyboard (104 keys)',
+  clear_overlay_pos:'Reset positions',
+  clean_upgrade:'Clean Old Upgrade Downloads', clean_upgrade_desc:'Transmission BT keeps boot-*.tar.xz files after upgrades. Removing them frees space needed for the next upgrade.',
+  clean_upgrade_btn:'Clean Old Boot Tarballs', torrent_empty:'No upgrade downloads to clean.',
+  cleaned:'Cleaned {n} boot tarballs.', cleaned_skip:'Skipped — transmission-daemon is running.',
+  clean_cf:'Remove {n} upgrade download(s) from /userdata/system/torrent/output/?',
+  files_dirs:'{d} dirs, {f} files', size_free:'{used} used / {total} total ({pct} free)', size_used:'{s} used',
+  prompt_rename:'New name', prompt_mkdir:'Folder name',
+  upgrade_local:'Install Downloaded Package', upgrade_cancel:'Cancel',
+  upgrade_cancelled:'Upgrade cancelled.',
+  cf_upgrade_local:'Install the boot.tar.xz already in system\\upgrade (fetched via BT or copied over the network)? A reboot is needed afterwards.',
+  cf_upgrade_cancel:'Cancel the running download? (Once installation to /boot starts it cannot be cancelled.)',
+  upgrade_dl:'Downloading: {pct}% ({got} / {total}) {speed}',
+  upgrade_verify:'Verifying package integrity…', upgrade_install:'Installing to /boot…',
+  upgrade_local_hint:'Too slow? Fetch boot.tar.xz via BT or a PC download manager, copy it to \\\\BATOCERA\\share\\system\\upgrade, then "Install Downloaded Package".',
+  nav_backup:'Backup', bk_title:'User Data Backup',
+  bk_hint:'Backs up only user data: games, saves, BIOS, configs, cheats and media. System files (system image, package cache, BT downloads) are excluded. Archives are stored at \\\\BATOCERA\\share\\backups.',
+  bk_start:'Start Backup', bk_files:'Backup Archives',
+  bk_files_hint:'Archives live in \\\\BATOCERA\\share\\backups — copy them to a PC via the network share for safekeeping.',
+  bk_set_roms:'Game ROMs', bk_set_saves:'Saves', bk_set_bios:'BIOS',
+  bk_set_configs:'System & emulator configs (incl. Wine bottles)',
+  bk_set_media:'Media (music/screenshots/recordings/splash)',
+  bk_set_extras:'Extras (cheats/decorations/themes/kodi…)',
+  bk_scan:'Calculating size…', bk_running:'Backing up: {pct}% ({got} / {total}) {speed}',
+  bk_restore_running:'Restoring {f}… (ES restarts automatically when done)',
+  bk_done:'Backup finished: {f} ({size})', bk_restore_done:'Restore finished, EmulationStation restarted.',
+  bk_failed:'Operation failed: {e}', bk_cancelled:'Cancelled.',
+  bk_none:'Nothing selected', cf_backup:'Start backup? The archive is stored on the same disk — copy it elsewhere afterwards.',
+  cf_restore:'Restore {f}?\nContents: {what}\nExisting files will be overwritten. EmulationStation stops during restore and restarts afterwards.',
+  cf_bk_delete:'Delete archive {f}?', cf_bk_cancel:'Abort the running backup/restore?',
+  bk_empty:'No archives yet', bk_restore:'Restore', bk_delete:'Delete', bk_th_date:'Date',
+  bk_th_content:'Contents',
+  bk_s_roms:'ROMs', bk_s_saves:'Saves', bk_s_bios:'BIOS',
+  bk_s_configs:'Configs', bk_s_media:'Media', bk_s_extras:'Extras',
+  default_tag:'(default)', players:'{n}p',
+  nav_fbneo:'Game Library', fb_title:'FBNeo Game Library',
+  fb_hint:'Games come from the svcpcb torrent (archive.org). Tick the ones you want, then download over BT or upload .zip/.7z manually. Installed games are detected automatically.',
+  fb_search_ph:'Search name / title…', fb_f_all:'All', fb_f_missing:'Not downloaded',
+  fb_f_installed:'Installed', fb_f_sel:'Selected', fb_sel_page:'Select page',
+  fb_sel_clear:'Clear selection', fb_dl:'BT download selected', fb_upload:'Upload ROMs',
+  fb_stop:'Stop', fb_peers_ph:'Manual peers, e.g. 192.168.1.10:6881', fb_add_peer:'Add peer',
+  fb_peer_hint:'archive.org tracker and web seeds are unreachable from this box — seed the same torrent on your PC and add its LAN address here.',
+  fb_drop:'Drag & drop .zip / .7z here to upload into /userdata/roms/fbneo',
+  fb_stat:'{n} games, {i} installed', fb_th_name:'ROM', fb_th_title:'Title', fb_th_year:'Year',
+  fb_th_size:'Size', fb_th_state:'Status', fb_installed:'Installed', fb_missing:'Not downloaded',
+  fb_sel_n:'{n} selected', fb_none_sel:'Nothing selected', fb_started:'Download queued: {n}',
+  fb_stat_line:'{p}% ({a} / {b}) {s} peers:{peers}',
+  fb_peer_added:'Peer(s) added: {n}', fb_load_err:'Library load failed: ',
+  dl_installed:'Installed', dl_missing:'Not installed', dl_search_ph:'Search ROM / title…',
+  dl_dl_sel:'BT Download Selected', dl_btn:'BT Download', dl_queued:'Queued',
+  dl_queued_n:'{n} queued', dl_added:'Added to download queue: {n}', dl_stopped:'Download stopped',
+  dl_more:'Load More', dl_rest_n:'{a} / {b} shown', dl_load_err:'Download list load failed: ',
+  dl_proxy_ph:'HTTP proxy, e.g. http://192.168.1.10:7890', dl_proxy_save:'Save proxy',
+  dl_ia_email_ph:'archive.org email', dl_ia_pass_ph:'password',
+  dl_ia_login:'Log in', dl_ia_logout:'Log out',
+  dl_ia_ok:'logged in — disc downloads enabled', dl_ia_no:'archive.org account required for disc downloads (free signup)',
+  dl_src_title:'Download Sources', dl_go_settings:'Go to Settings',
+  dl_ia_hint:'One login shared by all disc systems (Saturn / PSX / PS2). Free signup at archive.org.',
+  dl_proxy_lbl:'HTTP Proxy', dl_proxy_hint2:'Required for archive.org (disc downloads) on some networks',
+  dl_peers_lbl:'Manual BT Peers', dl_peers_hint2:'Applied to every BT download (e.g. a PC seeding on your LAN)',
+  dl_residue:'{n} leftover partial-download item(s), {s} — from failed/interrupted downloads',
+  dl_clean_btn:'Clean up', dl_cleaned:'Removed {n} leftover item(s), freed {s}',
+  dl_upload_lbl:'BT Upload', dl_upload_hint:'Share downloaded pieces back to other peers (default on)',
+  dl_seed_lbl:'BT Seeding', dl_seed_hint:'Keep seeding after a download finishes so other devices can fetch from this one (default on)',
+  dl_port_lbl:'BT Listen Port', dl_port_hint:'Inbound peer connections (forward it on your router for better swarm connectivity; default 6881)',
+  dl_seeding:'Seeding', dl_seeding_up:'↑ {s}/s to {n} peer(s)',
+  scrape_btn:'Scrape {n} missing', scrape_running:'Scraping {done}/{total} (found {found}): {cur}',
+  scrape_done:'Scrape finished — found {found}, no match {notfound}, errors {errors}',
+  scrape_missing:'{n} games lack metadata', scrape_all_ok:'All games have metadata',
+  scrape_nocreds:'No ScreenScraper account saved — set it in the EmulationStation scraper first',
+  save:'Save'
+};
+// ---- Language state & browser language detection / 语言状态与浏览器语言检测 ----
+let CURRENT_LOCALE = { ...FALLBACK_LOCALE };
+const LANG_TAGS = { en:'en', zh:'zh-CN', zh_TW:'zh-TW', ja:'ja', ko:'ko' };
+function detectLang(){
+  const n = (navigator.language || 'en').toLowerCase();
+  if (n.startsWith('zh')) return /hant|tw|hk|mo/.test(n) ? 'zh_TW' : 'zh';
+  if (n.startsWith('ja')) return 'ja';
+  if (n.startsWith('ko')) return 'ko';
+  return 'en';
+}
+let lang = localStorage.getItem('lang') || detectLang();
+let overlaysAvailable = [];
+let overlayButtons = {}; // overlay name -> button center {esInputName: {x, y} pct}
+
+// Overlay button centres, in percent of the 225x270 canvas. / 覆盖图按钮中心坐标（225x270 画布的百分比）
+// Measured on the Batocera controller-overlay template (all 57 PNGs share it).
+const UNIVERSAL_BUTTONS = {
+  // Shoulders: upper block = L2/R2 (LT/RT), lower block = L1/R1 (LB/RB)
+  l2:       { x: 21.0, y: 7.6 },
+  pageup:   { x: 21.0, y: 20.4 },
+  r2:       { x: 80.0, y: 7.6 },
+  pagedown: { x: 80.0, y: 20.4 },
+  // D-PAD arms
+  up:       { x: 20.5, y: 41.3 },
+  down:     { x: 20.5, y: 59.3 },
+  left:     { x: 7.0,  y: 50.2 },
+  right:    { x: 33.0, y: 50.2 },
+  // Face buttons
+  y:        { x: 73.0, y: 37.0 },
+  x:        { x: 62.2, y: 47.4 },
+  b:        { x: 86.4, y: 47.4 },
+  a:        { x: 73.5, y: 57.0 },
+  // Start / select row
+  select:   { x: 36.5, y: 60.0 },
+  start:    { x: 56.2, y: 60.0 },
+  hotkey:   { x: 46.0, y: 70.5 },
+  // Stick clicks
+  l3:       { x: 26.0, y: 82.5 },
+  r3:       { x: 72.5, y: 82.5 },
+  // Analog stick directions (only shown when the config binds them)
+  joystick1up:    { x: 26.0, y: 74.5 },
+  joystick1down:  { x: 26.0, y: 90.5 },
+  joystick1left:  { x: 17.0, y: 82.5 },
+  joystick1right: { x: 35.0, y: 82.5 },
+  joystick2up:    { x: 72.5, y: 74.5 },
+  joystick2down:  { x: 72.5, y: 90.5 },
+  joystick2left:  { x: 63.5, y: 82.5 },
+  joystick2right: { x: 81.5, y: 82.5 },
+};
+
+// SDL2 keycodes used by ES for keyboard bindings -> readable names / ES 键盘绑定的 SDL2 键码 → 可读名称
+const KEY_NAMES = {
+  '1073741906': '▲', '1073741905': '▼', '1073741904': '◀', '1073741903': '▶',
+  '1073742048': 'LCtrl', '1073742049': 'LShift', '1073742050': 'LAlt', '1073742051': 'LWin',
+  '1073742052': 'RCtrl', '1073742053': 'RShift', '1073742054': 'RAlt', '1073742055': 'RWin',
+  '1073741896': 'Del', '1073741897': 'Ins', '1073741898': 'Home', '1073741899': 'PgUp',
+  '1073741901': 'End', '1073741902': 'PgDn', '1073741904': '◀',
+  '1073741908': 'F1', '1073741909': 'F2', '1073741910': 'F3', '1073741911': 'F4',
+  '1073741912': 'F5', '1073741913': 'F6', '1073741914': 'F7', '1073741915': 'F8',
+  '1073741916': 'F9', '1073741917': 'F10', '1073741918': 'F11', '1073741919': 'F12',
+  '8': 'Bksp', '9': 'Tab', '13': 'Enter', '27': 'Esc', '32': 'Space', '127': 'Del',
+};
+function fmtBinding(inp){
+  const type = String(inp.type || '');
+  if (type === 'key') {
+    const known = KEY_NAMES[String(inp.id)];
+    if (known) return known;
+    const code = Number(inp.id);
+    if (code >= 33 && code < 127) return String.fromCharCode(code).toUpperCase();
+    return '#' + inp.id;
+  }
+  if (type === 'axis') {
+    const sign = inp.value === '1' ? '+' : (inp.value === '-1' ? '-' : '');
+    return 'AX' + inp.id + sign;
+  }
+  if (type === 'button') return 'B' + inp.id;
+  return String(inp.id || '?');
+}
+
+// ---- Controller types offered in the picker / 选择器中提供的手柄类型 ----
+// Each family is drawn in the same built-in SVG style as the arcade stick and
+// keyboard below (svg: kind selects the body shape in GAMEPAD_ART).
+const PAD_TYPES = [
+  { id: 'playstation', i18n: 'pad_ps',       svg: 'ps' },   // PS1 → PS5 (identical layout)
+  { id: 'xbox',        i18n: 'pad_xbox',     svg: 'xbox' },
+  { id: 'nintendo',    i18n: 'pad_nintendo', svg: 'sfc' },
+  { id: 'steam',       i18n: 'pad_steam',    svg: 'steam' },
+  { id: 'arcade',      i18n: 'pad_arcade' },                 // 1 stick + 12 buttons
+  { id: 'keyboard',    i18n: 'pad_keyboard' },               // 104-key keyboard
+];
+function padTypeId(d) {
+  const key = 'padType:' + (d.deviceGUID || d.deviceName || '');
+  const saved = localStorage.getItem(key);
+  if (saved && PAD_TYPES.some(p => p.id === saved)) return saved;
+  return String(d.type || '') === 'keyboard' ? 'keyboard' : 'playstation';
+}
+function setPadType(di, id) {
+  const d = pads[di];
+  localStorage.setItem('padType:' + (d.deviceGUID || d.deviceName || ''), id);
+  renderPads();
+}
+
+// Short labels for the ES input names, used inside the built-in drawings / ES 输入名的短标签（用于内置图示）
+const FN_SHORT = {
+  up: '▲', down: '▼', left: '◀', right: '▶',
+  a: 'A', b: 'B', x: 'X', y: 'Y',
+  start: 'START', select: 'SEL', hotkey: 'HK',
+  pageup: 'L1', pagedown: 'R1', l2: 'L2', r2: 'R2', l3: 'L3', r3: 'R3',
+  joystick1up: 'J1▲', joystick1down: 'J1▼', joystick1left: 'J1◀', joystick1right: 'J1▶',
+  joystick2up: 'J2▲', joystick2down: 'J2▼', joystick2left: 'J2◀', joystick2right: 'J2▶',
+};
+function fnShort(n) { return FN_SHORT[n] || n; }
+
+// ---- Arcade stick: one 8-way stick, select/start on top, two rows of 5 / 街机摇杆图示 ----
+// Slot table: [ES input name, cx, cy, radius]
+const ARCADE_SLOTS = [
+  ['up', 78, 40, 13], ['down', 78, 200, 13], ['left', 18, 120, 13], ['right', 138, 120, 13],
+  ['select', 252, 34, 14], ['start', 308, 34, 14], ['hotkey', 364, 34, 12],
+  ['x', 184, 92, 18], ['y', 228, 92, 18], ['pageup', 272, 92, 18], ['l2', 316, 92, 18], ['l3', 360, 92, 18],
+  ['a', 184, 142, 18], ['b', 228, 142, 18], ['pagedown', 272, 142, 18], ['r2', 316, 142, 18], ['r3', 360, 142, 18],
+];
+function arcadeSvg(d) {
+  const vals = {};
+  for (const inp of d.inputs || []) vals[inp.name] = fmtBinding(inp);
+  // hotkey often shares the select button on arcade sticks — merge the label then
+  const hkMerged = vals.hotkey && vals.hotkey === vals.select;
+  const parts = [`<svg viewBox="0 0 440 236" xmlns="http://www.w3.org/2000/svg">`,
+    `<rect x="1" y="1" width="438" height="234" rx="14" fill="#1b2029" stroke="#2e3542"/>`,
+    `<circle cx="78" cy="120" r="52" fill="none" stroke="#2e3542"/>`,
+    `<circle cx="78" cy="120" r="30" fill="#232936" stroke="#39414f"/>`,
+    `<text x="78" y="124" text-anchor="middle" font-size="10" fill="#7d8899">STICK</text>`];
+  for (const [name, cx, cy, r] of ARCADE_SLOTS) {
+    if (name === 'hotkey' && hkMerged) continue;
+    const v = vals[name];
+    const bound = !!v;
+    const axis = bound && String((d.inputs || []).find(i => i.name === name)?.type) === 'axis';
+    const gcy = bound ? cy - 1 : cy + 3;
+    const label = name === 'select' && hkMerged ? fnShort(name) + '·' + fnShort('hotkey') : fnShort(name);
+    parts.push(`<g><title>${esc(name)}${bound ? ' = ' + esc(v) : ''}</title>`,
+      `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${bound ? '#26303f' : '#1e232c'}" stroke="${bound ? (axis ? '#e6a23c' : '#4da3ff') : '#39414f'}" stroke-width="1.4"/>`,
+      `<text x="${cx}" y="${gcy}" text-anchor="middle" font-size="${r > 15 ? 9 : 8}" fill="${bound ? '#8b96a5' : '#5a6372'}">${esc(label)}</text>`,
+      bound ? `<text x="${cx}" y="${cy + 9}" text-anchor="middle" font-size="${r > 15 ? 10 : 9}" font-weight="700" fill="${axis ? '#e6a23c' : '#4da3ff'}">${esc(v)}</text>` : '',
+      `</g>`);
+  }
+  parts.push('</svg>');
+  return parts.join('');
+}
+
+// ---- Handheld gamepads (PlayStation / Xbox / SFC / Steam Controller) / 手持手柄图示 ----
+// Same visual language as the arcade stick above: dark panel, circle slots,
+// accent highlight + binding value on bound inputs.
+// Per kind: viewBox size, body outline, decorative wells, glyph overrides,
+// slot table [ES input name, cx, cy, radius].
+const GAMEPAD_ART = {
+  ps: {
+    w: 440, h: 300,
+    body: `<path d="M100,52 h240 q32,0 40,38 l16,82 q8,46 -26,60 q-34,14 -54,-22 l-10,-22 h-192 l-10,22 q-20,36 -54,22 q-34,-14 -26,-60 l16,-82 q8,-38 40,-38 z" fill="#232936" stroke="#39414f" stroke-width="1.5"/>`,
+    deco: [
+      `<circle cx="104" cy="141" r="32" fill="none" stroke="#2e3542"/>`,
+      `<circle cx="340" cy="127" r="34" fill="none" stroke="#2e3542"/>`,
+      `<circle cx="172" cy="214" r="27" fill="none" stroke="#2e3542"/>`,
+      `<circle cx="268" cy="214" r="27" fill="none" stroke="#2e3542"/>`],
+    glyphs: { y: '△', x: '□', b: '○', a: '✕' },
+    slots: [
+      ['l2', 96, 30, 13], ['pageup', 96, 62, 14], ['r2', 344, 30, 13], ['pagedown', 344, 62, 14],
+      ['up', 104, 116, 13], ['down', 104, 166, 13], ['left', 79, 141, 13], ['right', 129, 141, 13],
+      ['y', 340, 100, 15], ['x', 313, 127, 15], ['b', 367, 127, 15], ['a', 340, 154, 15],
+      ['select', 192, 128, 10], ['start', 248, 128, 10], ['hotkey', 220, 156, 10],
+      ['l3', 172, 214, 20], ['r3', 268, 214, 20]],
+  },
+  xbox: {
+    w: 440, h: 300,
+    body: `<path d="M80,55 h280 q40,0 50,60 q8,55 -10,105 q-15,42 -55,38 q-32,-3 -45,-28 h-140 q-13,25 -45,28 q-40,4 -55,-38 q-18,-50 -10,-105 q10,-60 50,-60 z" fill="#232936" stroke="#39414f" stroke-width="1.5"/>`,
+    deco: [
+      `<circle cx="118" cy="116" r="27" fill="none" stroke="#2e3542"/>`,
+      `<circle cx="118" cy="214" r="30" fill="none" stroke="#2e3542"/>`,
+      `<circle cx="330" cy="114" r="34" fill="none" stroke="#2e3542"/>`,
+      `<circle cx="252" cy="206" r="27" fill="none" stroke="#2e3542"/>`],
+    glyphs: {},
+    slots: [
+      ['l2', 96, 24, 13], ['pageup', 142, 44, 14], ['r2', 344, 24, 13], ['pagedown', 298, 44, 14],
+      ['l3', 118, 116, 20],
+      ['up', 118, 190, 11], ['down', 118, 238, 11], ['left', 94, 214, 11], ['right', 142, 214, 11],
+      ['y', 330, 88, 15], ['x', 303, 114, 15], ['b', 357, 114, 15], ['a', 330, 140, 15],
+      ['r3', 252, 206, 20],
+      ['select', 196, 96, 10], ['start', 246, 96, 10], ['hotkey', 221, 134, 12]],
+  },
+  sfc: {
+    w: 440, h: 250,
+    body: `<path d="M100,62 h240 a72,72 0 0 1 72,72 a72,72 0 0 1 -72,72 h-240 a72,72 0 0 1 -72,-72 a72,72 0 0 1 72,-72 z" fill="#232936" stroke="#39414f" stroke-width="1.5"/>`,
+    deco: [
+      `<circle cx="110" cy="134" r="32" fill="none" stroke="#2e3542"/>`,
+      `<circle cx="330" cy="134" r="36" fill="none" stroke="#2e3542"/>`,
+      `<rect x="170" y="126" width="100" height="34" rx="17" fill="none" stroke="#2e3542"/>`],
+    glyphs: {},
+    slots: [
+      ['pageup', 96, 30, 15], ['pagedown', 344, 30, 15],
+      ['up', 110, 110, 13], ['down', 110, 158, 13], ['left', 86, 134, 13], ['right', 134, 134, 13],
+      ['x', 330, 102, 15], ['y', 304, 128, 15], ['a', 356, 128, 15], ['b', 330, 154, 15],
+      ['select', 196, 143, 9], ['start', 244, 143, 9], ['hotkey', 220, 172, 8]],
+  },
+  steam: {
+    w: 440, h: 260,
+    body: `<path d="M70,56 h300 q46,0 52,72 q5,86 -42,98 h-320 q-47,-12 -42,-98 q6,-72 52,-72 z" fill="#232936" stroke="#39414f" stroke-width="1.5"/>`,
+    deco: [
+      `<circle cx="112" cy="138" r="38" fill="none" stroke="#2e3542"/>`,
+      `<circle cx="112" cy="138" r="30" fill="#1e232c" stroke="#39414f"/>`,
+      `<text x="112" y="142" text-anchor="middle" font-size="9" fill="#5a6372">J1</text>`,
+      `<circle cx="328" cy="138" r="38" fill="none" stroke="#2e3542"/>`,
+      `<circle cx="328" cy="138" r="30" fill="#1e232c" stroke="#39414f"/>`,
+      `<circle cx="160" cy="200" r="21" fill="none" stroke="#2e3542"/>`],
+    glyphs: {},
+    slots: [
+      ['l2', 112, 14, 11], ['pageup', 112, 42, 13], ['r2', 328, 14, 11], ['pagedown', 328, 42, 13],
+      ['joystick1up', 112, 116, 8], ['joystick1down', 112, 160, 8],
+      ['joystick1left', 90, 138, 8], ['joystick1right', 134, 138, 8],
+      ['l3', 160, 200, 15],
+      ['r3', 328, 138, 8],
+      ['joystick2up', 328, 116, 8], ['joystick2down', 328, 160, 8],
+      ['joystick2left', 306, 138, 8], ['joystick2right', 350, 138, 8],
+      ['y', 354, 182, 10], ['x', 338, 198, 10], ['b', 370, 198, 10], ['a', 354, 214, 10],
+      ['select', 204, 184, 9], ['start', 236, 184, 9], ['hotkey', 220, 208, 10]],
+  },
+};
+function gamepadSvg(d, kind) {
+  const art = GAMEPAD_ART[kind];
+  if (!art) return arcadeSvg(d);
+  const vals = {}, types = {};
+  for (const inp of d.inputs || []) {
+    vals[inp.name] = fmtBinding(inp);
+    types[inp.name] = inp.type;
+  }
+  const hkMerged = vals.hotkey && vals.hotkey === vals.select;
+  const parts = [`<svg viewBox="0 0 ${art.w} ${art.h}" xmlns="http://www.w3.org/2000/svg">`,
+    `<rect x="1" y="1" width="${art.w - 2}" height="${art.h - 2}" rx="14" fill="#1b2029" stroke="#2e3542"/>`,
+    art.body, ...art.deco];
+  for (const [name, cx, cy, r] of art.slots) {
+    if (name === 'hotkey' && hkMerged) continue;
+    const v = vals[name];
+    const bound = !!v;
+    const axis = bound && String(types[name]) === 'axis';
+    const label = name === 'select' && hkMerged
+      ? fnShort(name) + '·' + fnShort('hotkey')
+      : (art.glyphs[name] || fnShort(name));
+    const fsL = r > 15 ? 9 : r > 10 ? 8 : 6;
+    const fsV = r > 15 ? 10 : r > 10 ? 9 : 7;
+    parts.push(`<g><title>${esc(name)}${bound ? ' = ' + esc(v) : ''}</title>`,
+      `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${bound ? '#26303f' : '#1e232c'}" stroke="${bound ? (axis ? '#e6a23c' : '#4da3ff') : '#39414f'}" stroke-width="1.4"/>`,
+      `<text x="${cx}" y="${bound ? cy - 1 : cy + 3}" text-anchor="middle" font-size="${fsL}" fill="${bound ? '#8b96a5' : '#5a6372'}">${esc(label)}</text>`,
+      bound ? `<text x="${cx}" y="${cy + Math.max(6, r * 0.55)}" text-anchor="middle" font-size="${fsV}" font-weight="700" fill="${axis ? '#e6a23c' : '#4da3ff'}">${esc(v)}</text>` : '',
+      `</g>`);
+  }
+  parts.push('</svg>');
+  return parts.join('');
+}
+
+// ---- 104-key keyboard / 104 键键盘图示 ----
+// Row entries: [label, width units, SDL keycode or null]
+const KB_ROWS = [
+  [['Esc', 1, 27], ['F1', 1], ['F2', 1], ['F3', 1], ['F4', 1], ['F5', 1], ['F6', 1], ['F7', 1], ['F8', 1], ['F9', 1], ['F10', 1], ['F11', 1], ['F12', 1], ['PrtSc', 1], ['ScrLk', 1], ['Pause', 1]],
+  [['`', 1, 96], ['1', 1, 49], ['2', 1, 50], ['3', 1, 51], ['4', 1, 52], ['5', 1, 53], ['6', 1, 54], ['7', 1, 55], ['8', 1, 56], ['9', 1, 57], ['0', 1, 48], ['-', 1, 45], ['=', 1, 61], ['Bksp', 2, 8], ['Ins', 1, 1073741897], ['Home', 1, 1073741898], ['PgUp', 1, 1073741899]],
+  [['Tab', 1.5, 9], ['Q', 1, 113], ['W', 1, 119], ['E', 1, 101], ['R', 1, 114], ['T', 1, 116], ['Y', 1, 121], ['U', 1, 117], ['I', 1, 105], ['O', 1, 111], ['P', 1, 112], ['[', 1, 91], [']', 1, 93], ['\\', 1.5, 92], ['Del', 1, 127], ['End', 1, 1073741901], ['PgDn', 1, 1073741902]],
+  [['Caps', 1.75], ['A', 1, 97], ['S', 1, 115], ['D', 1, 100], ['F', 1, 102], ['G', 1, 103], ['H', 1, 104], ['J', 1, 106], ['K', 1, 107], ['L', 1, 108], [';', 1, 59], ["'", 1, 39], ['Enter', 2.25, 13]],
+  [['Shift', 2.25, 1073742049], ['Z', 1, 122], ['X', 1, 120], ['C', 1, 99], ['V', 1, 118], ['B', 1, 98], ['N', 1, 110], ['M', 1, 109], [',', 1, 44], ['.', 1, 46], ['/', 1, 47], ['Shift', 2.75, 1073742053], ['↑', 1, 1073741906]],
+  [['Ctrl', 1.5, 1073742048], ['Win', 1.25, 1073742051], ['Alt', 1.25, 1073742050], ['Space', 6.5, 32], ['Alt', 1.25, 1073742054], ['Menu', 1.25], ['Ctrl', 1.5, 1073742052], ['←', 1, 1073741904], ['↓', 1, 1073741905], ['→', 1, 1073741903]],
+];
+const KB_NUMPAD = [
+  [['Num', 1], ['/', 1], ['*', 1], ['-', 1]],
+  [['7', 1], ['8', 1], ['9', 1], ['+', 1]],
+  [['4', 1], ['5', 1], ['6', 1], ['.', 1]],
+  [['1', 1], ['2', 1], ['3', 1], ['Ent', 1]],
+  [['0', 2], [',', 1]],
+];
+function keyboardHtml(d) {
+  const bound = {};
+  for (const inp of d.inputs || []) {
+    if (String(inp.type) !== 'key') continue;
+    const k = String(inp.id);
+    bound[k] = bound[k] ? bound[k] + '/' + fnShort(inp.name) : fnShort(inp.name);
+  }
+  const cap = ([label, w, code]) => {
+    const f = code == null ? null : bound[String(code)];
+    return `<div class="kb-cap${f ? ' on' : ''}" style="width:${w * 30 - 4}px" title="${esc(label)}${f ? ' → ' + esc(f) : ''}">${esc(label)}${f ? `<span class="fn">${esc(f)}</span>` : ''}</div>`;
+  };
+  return `<div class="kb"><div class="kb-side">`
+    + KB_ROWS.map(r => `<div class="kb-row">${r.map(cap).join('')}</div>`).join('')
+    + `</div><div class="kb-side">`
+    + KB_NUMPAD.map(r => `<div class="kb-row">${r.map(cap).join('')}</div>`).join('')
+    + `</div></div>`;
+}
+
+// ---- Translation helpers & language switching / 翻译辅助与语言切换 ----
+function t(k, v) {
+  const s = (CURRENT_LOCALE && CURRENT_LOCALE[k]) || FALLBACK_LOCALE[k] || k;
+  return s.replace(/\{(\w+)\}/g, (m, n) => (v && n in v) ? v[n] : m);
+}
+function applyLang() {
+  document.documentElement.lang = LANG_TAGS[lang] || 'en';
+  document.title = t('title');
+  document.querySelectorAll('[data-i18n]').forEach(el => el.textContent = t(el.dataset.i18n));
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => el.placeholder = t(el.dataset.i18nPh));
+  $('langSel').value = lang;
+}
+async function loadLocale() {
+  try {
+    const j = await fetch('/api/locales/' + lang + '.json', { cache: 'no-cache' }).then(r => r.json());
+    CURRENT_LOCALE = { ...FALLBACK_LOCALE, ...(j || {}) };
+  } catch (e) {
+    CURRENT_LOCALE = { ...FALLBACK_LOCALE };
+  }
+  applyLang();
+}
+async function loadOverlayList() {
+  try {
+    const j = await fetch('/api/controller-overlay/list').then(r => r.json());
+    overlaysAvailable = (j && j.overlays) || [];
+  } catch (e) {
+    overlaysAvailable = ['generic', 'xbox', 'ps3', 'mame'];
+  }
+}
+function setLang(l){
+  lang=l;localStorage.setItem('lang',l);CURRENT_LOCALE={...FALLBACK_LOCALE};
+  loadLocale();
+  for(const k in loaded)delete loaded[k];
+  dlLibs={};
+  if(curTab==='games'&&curSys){loadSystems();selectSys(curSys);return}
+  if(curTab==='files'){loaded.files=1;fmGo(fmPath)}else loadTab(curTab);
+}
+
+// ---------- Small helpers: DOM, fetch API, formatting, toast / 小工具：DOM、接口请求、格式化与提示 ----------
+const $=id=>document.getElementById(id);
+function toast(msg,err){const d=document.createElement('div');d.className='toast'+(err?' err':'');d.textContent=msg;$('toast').appendChild(d);setTimeout(()=>d.remove(),4000)}
+async function api(path,opts){const r=await fetch(path,opts);const j=await r.json().catch(()=>({ok:false,error:'HTTP '+r.status}));if(!r.ok||j.ok===false)throw new Error(j.error||('HTTP '+r.status));return j}
+async function post(path,data){return api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})}
+function fmtSize(n){for(const u of['B','KB','MB','GB','TB']){if(n<1024)return n.toFixed(1)+u;n/=1024}return n.toFixed(1)+'PB'}
+function fmtUp(s){const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return (lang==='zh'||lang==='zh_TW')?((d?d+'天':'')+h+'时'+m+'分'):((d?d+'d ':'')+h+'h '+m+'m')}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+// ---------- Navigation / 标签导航 ----------
+let curTab='dash';
+document.querySelectorAll('#nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#nav button').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');$('tab-'+b.dataset.tab).classList.add('on');curTab=b.dataset.tab;
+  loadTab(curTab);
+});
+const loaded={};
+function loadTab(t){
+  if(t==='dash')loadDash();
+  if(t==='settings')loadSettings();
+  if(t==='pads')loadPads();
+  if(t==='games'&&!loaded.games){loaded.games=1;loadSystems()}
+  if(t==='bios'&&!loaded.bios){loaded.bios=1;loadBios()}
+  if(t==='files'&&!loaded.files){loaded.files=1;fmGo('/userdata')}
+  if(t==='backup')loadBackup();
+}
+
+// ---------- Dashboard / 仪表盘 ----------
+async function loadDash(){
+  try{
+    const i=await api('/api/system/info');
+    $('sideVer').textContent=(i.app_version?i.app_version+' · ':'')+i.version+' · '+(i.ips[0]||'');
+    const mp=100-Math.round(i.mem.avail/i.mem.total*100), dp=Math.round(i.disk.used/i.disk.total*100);
+    $('dashGrid').innerHTML=`
+      <div class="stat"><div class="v">${esc(i.hostname)}</div><div class="k">${t('d_hostname')} · ${i.ips.map(esc).join(', ')}</div></div>
+      <div class="stat"><div class="v">${fmtUp(i.uptime)}</div><div class="k">${t('d_uptime')} · ${t('d_load')} ${i.load.join(' ')}</div></div>
+      <div class="stat"><div class="v">${mp}%</div><div class="k">${t('d_mem')} ${fmtSize(i.mem.total-i.mem.avail)} / ${fmtSize(i.mem.total)}</div><div class="bar"><i style="width:${mp}%"></i></div></div>
+      <div class="stat"><div class="v">${dp}%</div><div class="k">${t('d_disk')} ${fmtSize(i.disk.used)} / ${fmtSize(i.disk.total)}</div><div class="bar"><i style="width:${dp}%"></i></div></div>
+      ${i.temps.map(x=>`<div class="stat"><div class="v">${x.temp}°C</div><div class="k">${esc(x.name)}</div></div>`).join('')}
+      <div class="stat"><div class="v ${i.esRunning?'tag-ok':'tag-danger'}">${i.esRunning?t('d_running'):t('d_stopped')}</div><div class="k">${t('d_es_status')}</div></div>`;
+  }catch(e){$('dashGrid').innerHTML='<div class="loading">'+esc(e.message)+'</div>'}
+  checkVersions();
+  renderDisk();
+  resumeUpgradePoll();
+}
+async function resumeUpgradePoll(){
+  try{
+    const s=await api('/api/system/upgrade-status');
+    if(!s)return;
+    if(s.running){_upgBtns(true);pollUpgrade();}
+    else if(s.phase==='failed'&&s.error)$('upgradeStatus').textContent=t('upgrade_failed',{e:s.error})+(s.tail?'\n'+s.tail:'');
+    else if(s.phase==='cancelled')$('upgradeStatus').textContent=t('upgrade_cancelled');
+    else if(s.phase==='done')$('upgradeStatus').textContent=t('upgrade_done');
+  }catch(e){}
+}
+let _verCache=null;
+async function checkVersions(force){
+  if(!force&&_verCache){renderVersions(_verCache);return}
+  $('verGrid').innerHTML='<div class="loading">'+t('checking')+'</div>';
+  try{
+    const v=await api('/api/system/version-check');
+    _verCache=v;renderVersions(v);
+  }catch(e){$('verGrid').innerHTML='<div class="loading">'+esc(e.message)+'</div>'}
+}
+function renderVersions(v){
+  const cur=(v.current||'').trim();
+  const isDev=/dev/.test(cur);
+  // current is e.g. "43c.1 2026/05/28 21:53", latest is "43.1" — compare just the
+  // version field, dropping the arch-variant letter suffix (43c.1 == 43.1)
+  const curVer=cur.split(/\s+/)[0]||'';
+  const norm=s=>String(s||'').replace(/(\d)[a-z]+/gi,'$1');
+  const compare=(chKey,label)=>{
+    const ch=v.channels[chKey]||{};
+    const latest=ch.version||'';
+    const date=ch.date||'';
+    const match=!!latest&&norm(curVer)===norm(latest);
+    return `<div class="stat">
+      <div class="k">${label}${isDev&&chKey==='stable'?' <span class="tag-warn">('+t('dev_note')+')</span>':''}</div>
+      <div class="v ${match?'tag-ok':'tag-warn'}">${esc(latest)||'—'}</div>
+      <div class="hint">${esc(date)} · ${match?t('up_to_date'):t('update_available')}</div></div>`;
+  };
+  $('verGrid').innerHTML=`
+    <div class="stat"><div class="k">${t('cur_ver')}</div><div class="v">${esc(cur)}</div><div class="hint">${isDev?t('dev_build'):t('stable_build')}</div></div>
+    ${compare('stable',t('latest_stable'))}
+    ${compare('butterfly',t('latest_butterfly'))}
+  `;
+}
+// ---- System upgrade: start / local install / cancel / progress poll / 系统升级：开始、本地安装、取消与进度轮询 ----
+async function doUpgrade(channel){
+  const label=channel==='stable'?t('latest_stable'):t('latest_butterfly');
+  if(!confirm(t('cf_upgrade',{ch:label})))return;
+  _upgBtns(true);
+  $('upgradeStatus').textContent='';
+  toast(t('updating'));
+  try{
+    const j=await post('/api/system/upgrade',{channel});
+    toast(t('upgrade_started'));
+    if(j.boost_mb)
+      $('upgradeStatus').textContent=t('upgrade_forced',{n:j.boost_mb});
+    pollUpgrade();
+  }catch(e){
+    if(/already in progress/i.test(e.message))toast(t('upgrade_in_progress'),1);
+    else toast(e.message,1);
+    _upgBtns(false);
+  }
+}
+async function doUpgradeLocal(){
+  if(!confirm(t('cf_upgrade_local')))return;
+  _upgBtns(true);
+  try{
+    const j=await post('/api/system/upgrade-local',{});
+    toast(t('upgrade_started'));
+    if(j.boost_mb)
+      $('upgradeStatus').textContent=t('upgrade_forced',{n:j.boost_mb});
+    pollUpgrade();
+  }catch(e){
+    if(/already in progress/i.test(e.message))toast(t('upgrade_in_progress'),1);
+    else toast(e.message,1);
+    _upgBtns(false);
+  }
+}
+async function cancelUpgrade(){
+  if(!confirm(t('cf_upgrade_cancel')))return;
+  try{await post('/api/system/upgrade-cancel',{});toast(t('done'));}
+  catch(e){toast(e.message,1)}
+}
+function _upgBtns(dis){
+  ['upgrade_stable','upgrade_butterfly','upgrade_local'].forEach(k=>{const b=document.querySelector('[data-i18n="'+k+'"]');b&&(b.disabled=dis)});
+}
+let _upPoll=null,_dlPrev=null;
+function pollUpgrade(){
+  if(_upPoll)clearInterval(_upPoll);
+  _upPoll=setInterval(async()=>{
+    let s;
+    try{s=await api('/api/system/upgrade-status')}catch(e){return}
+    if(s.phase==='failed'){
+      clearInterval(_upPoll);_upPoll=null;_dlPrev=null;
+      $('upgradeStatus').textContent=t('upgrade_failed',{e:s.error||''})+(s.tail?'\n'+s.tail:'');
+      toast(t('upgrade_failed',{e:s.error||''}),1);
+      _upgBtns(false);
+      return;
+    }
+    if(s.phase==='cancelled'){
+      clearInterval(_upPoll);_upPoll=null;_dlPrev=null;
+      $('upgradeStatus').textContent=t('upgrade_cancelled');
+      _upgBtns(false);
+      return;
+    }
+    if(s.running){
+      let txt=t('upgrade_running');
+      if(s.stage==='download'&&s.dl_total){
+        const pct=(100*s.dl_bytes/s.dl_total).toFixed(1);
+        let spd='';
+        const now=Date.now();
+        if(_dlPrev&&now>_dlPrev.t){
+          const bps=(s.dl_bytes-_dlPrev.b)/((now-_dlPrev.t)/1000);
+          if(bps>200)spd=fmtSize(Math.round(bps))+'/s';
+        }
+        _dlPrev={t:now,b:s.dl_bytes};
+        txt=t('upgrade_dl',{pct,got:fmtSize(s.dl_bytes),total:fmtSize(s.dl_total),speed:spd});
+      }else if(s.stage==='verify')txt=t('upgrade_verify');
+      else if(s.stage==='install')txt=t('upgrade_install')+(s.message?' — '+s.message:'');
+      else if(s.message)txt+=' — '+s.message;
+      $('upgradeStatus').textContent=txt;
+      return;
+    }
+    if(s.phase==='done'){
+      clearInterval(_upPoll);_upPoll=null;_dlPrev=null;
+      $('upgradeStatus').textContent=t('upgrade_done');
+      _upgBtns(false);
+    }
+  },3000);
+}
+// ---------- Backup & Restore / 备份与还原 ----------
+let _bkPoll=null,_bkPrev=null;
+async function loadBackup(){
+  try{
+    const j=await api('/api/backup/info');
+    $('bkSets').innerHTML=j.sets.filter(s=>s.present).map(s=>
+      `<label style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap"><input type="checkbox" class="bkset" value="${s.key}" checked> ${esc(t('bk_set_'+s.key))} <span class="hint">(${fmtSize(s.bytes)})</span></label>`
+    ).join('');
+    renderBkFiles(j.backups);
+    const st=await api('/api/backup/status');
+    if(st.running)pollBackup();
+    else showBkState(st);
+  }catch(e){toast(e.message,1)}
+}
+function renderBkFiles(list){
+  const tb=$('bkTable');
+  if(!list.length){tb.innerHTML='<tr><td class="hint">'+t('bk_empty')+'</td></tr>';return}
+  tb.innerHTML='<tr><th>'+t('th_file')+'</th><th>'+t('bk_th_date')+'</th><th>'+t('th_size')+'</th><th>'+t('bk_th_content')+'</th><th></th></tr>'
+    +list.map(b=>{
+      const what=b.sets?b.sets.map(k=>t('bk_s_'+k)).join(', '):'?';
+      return `<tr><td class="mono">${esc(b.name)}</td><td>${new Date(b.mtime*1000).toLocaleString()}</td><td>${fmtSize(b.size)}</td><td class="hint">${esc(what)}</td>
+      <td style="white-space:nowrap"><button onclick="restoreBackup('${esc(b.name)}','${esc(what)}')">${t('bk_restore')}</button>
+      <a href="/api/backup/download?f=${encodeURIComponent(b.name)}"><button>${t('download')}</button></a>
+      <button class="danger" onclick="deleteBackup('${esc(b.name)}')">${t('bk_delete')}</button></td></tr>`}).join('');
+}
+async function startBackup(){
+  const sets=[...document.querySelectorAll('.bkset:checked')].map(c=>c.value);
+  if(!sets.length)return toast(t('bk_none'),1);
+  if(!confirm(t('cf_backup')))return;
+  try{await post('/api/backup/create',{sets});pollBackup();}catch(e){toast(e.message,1)}
+}
+async function cancelBackup(){
+  if(!confirm(t('cf_bk_cancel')))return;
+  try{await post('/api/backup/cancel',{});}catch(e){toast(e.message,1)}
+}
+async function restoreBackup(f,what){
+  if(!confirm(t('cf_restore',{f,what:what||'?'})))return;
+  try{await post('/api/backup/restore',{file:f});pollBackup();}catch(e){toast(e.message,1)}
+}
+async function deleteBackup(f){
+  if(!confirm(t('cf_bk_delete',{f})))return;
+  try{await post('/api/backup/delete',{file:f});toast(t('done'));loadBackup();}catch(e){toast(e.message,1)}
+}
+function pollBackup(){
+  if(_bkPoll)clearInterval(_bkPoll);
+  _bkPoll=setInterval(async()=>{
+    let s;try{s=await api('/api/backup/status')}catch(e){return}
+    showBkState(s);
+    if(!s.running){clearInterval(_bkPoll);_bkPoll=null;_bkPrev=null;loadBackup();}
+  },2000);
+}
+function showBkState(s){
+  const el=$('bkStatus');
+  if(s.error){el.textContent=t('bk_failed',{e:s.error});return}
+  if(s.done==='cancelled'){el.textContent=t('bk_cancelled');return}
+  if(s.done==='restored'){el.textContent=t('bk_restore_done');return}
+  if(s.done){el.textContent=t('bk_done',{f:s.done,size:fmtSize(s.bytes)});return}
+  if(!s.running){el.textContent='';return}
+  if(s.action==='restore'){el.textContent=t('bk_restore_running',{f:s.file});return}
+  if(!s.total){el.textContent=t('bk_scan');return}
+  const pct=Math.min(100,100*s.bytes/s.total).toFixed(1);
+  let spd='';const now=Date.now();
+  if(_bkPrev){const bps=(s.bytes-_bkPrev.b)/((now-_bkPrev.t)/1000);if(bps>100000)spd=fmtSize(bps)+'/s'}
+  _bkPrev={b:s.bytes,t:now};
+  el.textContent=t('bk_running',{pct,got:fmtSize(s.bytes),total:fmtSize(s.total),speed:spd});
+}
+async function power(action){
+  if(!confirm(t('cf_'+action)))return;
+  try{await post('/api/power',{action});toast(t('done'));}catch(e){toast(e.message,1)}
+}
+async function renderDisk(){
+  try{
+    const d=await api('/api/system/disk-usage');
+    const pct=Math.round(d.used/d.total*100);
+    const free=fmtSize(d.free);
+    const statTotal=`<div class="stat"><div class="v">${pct}%</div><div class="k">${t('size_free',{used:fmtSize(d.used),total:fmtSize(d.total),pct:(100-pct)+'%'})}</div><div class="bar"><i style="width:${pct}%"></i></div><div class="hint">${free} ${100-pct}%</div></div>`;
+    const top=(d.breakdown||[]).slice(0,7).map(b=>`<div class="stat"><div class="v">${fmtSize(b.size)}</div><div class="k">/${esc(b.name)}</div></div>`).join('');
+    $('diskGrid').innerHTML=statTotal+top;
+    const torrents=d.torrent_upgrade||[];
+    if(torrents.length){
+      const totalSize=torrents.reduce((s,f)=>s+f.size,0);
+      $('torrentBox').innerHTML=`
+        <div class="hint">${torrents.length} boot tarball(s) totaling <b>${fmtSize(totalSize)}</b> in /userdata/system/torrent/output/</div>
+        <div class="torrent-list">
+        ${torrents.map(f=>`${esc(new Date(f.mtime*1000).toLocaleString())} ${esc(f.name)} (${fmtSize(f.size)})`).join('\n')}
+        </div>`;
+    }else{
+      $('torrentBox').innerHTML='';
+    }
+  }catch(e){$('diskGrid').innerHTML='<div class="loading">'+esc(e.message)+'</div>'}
+}
+async function cleanTorrent(){
+  const d=await api('/api/system/disk-usage');
+  const items=(d.torrent_upgrade||[]).length;
+  if(!items){toast(t('torrent_empty'));return}
+  if(!confirm(t('clean_cf',{n:items-1})))return;  // -1 because we keep newest
+  try{
+    const j=await post('/api/system/clean-upgrade',{});
+    toast(t('cleaned',{n:j.removed.length}));
+    renderDisk();
+  }catch(e){
+    if(/transmission-daemon is running/i.test(e.message))toast(t('cleaned_skip'),1);
+    else toast(e.message,1);
+  }
+}
+
+// ---------- Settings / 设置 ----------
+let confLines=[];
+async function loadSettings(){
+  loadVideo();loadAudio();loadConf();loadBackups();
+}
+async function loadVideo(){
+  try{
+    const v=await api('/api/video/status');
+    $('vidCur').textContent=v.currentOutput||'-';$('vidCurMode').textContent=v.currentMode||'-';
+    $('vidOutput').innerHTML=v.outputs.map(o=>`<option ${o===v.currentOutput?'selected':''}>${esc(o)}</option>`).join('');
+    $('vidMode').innerHTML=v.modes.map(m=>`<option value="${esc(m.mode)}" ${m.mode===v.currentMode?'selected':''}>${esc(m.desc)}</option>`).join('');
+  }catch(e){toast(t('err_video')+e.message,1)}
+}
+async function applyOutput(){try{await post('/api/video/output',{output:$('vidOutput').value});toast(t('switched_output'));loadVideo()}catch(e){toast(e.message,1)}}
+async function applyMode(){
+  if(!confirm(t('cf_apply_mode')))return;
+  try{await post('/api/video/mode',{mode:$('vidMode').value});toast(t('switched'));loadVideo()}catch(e){toast(e.message,1)}
+}
+async function loadAudio(){
+  try{
+    const a=await api('/api/audio/status');
+    $('audDev').innerHTML=a.devices.map(d=>`<option value="${esc(d.id)}" ${d.id===a.current?'selected':''}>${esc(d.name)}</option>`).join('');
+    $('audVol').value=a.volume;$('audVolV').textContent=a.volume;
+    $('audMuteBtn').textContent=a.muted?t('unmute'):t('mute');
+  }catch(e){toast(t('err_audio')+e.message,1)}
+}
+async function applyAudio(){try{await post('/api/audio/device',{device:$('audDev').value});toast(t('audio_switched'));loadAudio()}catch(e){toast(e.message,1)}}
+async function setVol(){try{await post('/api/audio/volume',{volume:$('audVol').value});toast(t('vol_set'))}catch(e){toast(e.message,1)}}
+async function toggleMute(){try{await post('/api/audio/volume',{volume:'mute-toggle'});loadAudio()}catch(e){toast(e.message,1)}}
+async function dlSaveConf(key,value){
+  try{await post('/api/settings/set',{key,value});toast(t('saved'));loadConf()}catch(e){toast(e.message,1)}
+}
+async function refreshIaState(){
+  try{
+    const j=await api('/api/dl/ia_state');
+    const on=!!j.auth;
+    if($('iaState2'))$('iaState2').textContent=on?t('dl_ia_ok'):t('dl_ia_no');
+    if($('iaState2'))$('iaState2').style.color=on?'var(--ok)':'var(--warn)';
+    for(const id of['iaEmail2','iaPass2','iaLoginBtn2'])if($(id))$(id).style.display=on?'none':'';
+    if($('iaLogoutBtn2'))$('iaLogoutBtn2').style.display=on?'':'none';
+  }catch(e){}
+}
+async function iaLoginGo(){
+  const email=$('iaEmail2').value.trim(),password=$('iaPass2').value;
+  if(!email||!password){toast(t('dl_ia_no'),1);return}
+  try{
+    await post('/api/dl/ia_login',{email,password});
+    toast(t('saved'));
+    for(const k in dlLibs)delete dlLibs[k];
+    refreshIaState();
+  }catch(e){toast(e.message,1)}
+}
+async function iaLogoutGo(){
+  try{
+    await post('/api/dl/ia_logout',{});
+    for(const k in dlLibs)delete dlLibs[k];
+    refreshIaState();
+  }catch(e){toast(e.message,1)}
+}
+// ---- batocera.conf editor: table view + raw text / batocera.conf 编辑器：表格与原文编辑 ----
+async function loadConf(){
+  try{
+    const j=await api('/api/settings');confLines=j.lines;renderSettingsTable();
+    const m={};confLines.forEach(l=>{if(l.type==='kv')m[l.key]=l.value});
+    $('wifiEn').checked=m['wifi.enabled']==='1';
+    $('wifiSsid').value=m['wifi.ssid']||'';$('wifiKey').value=m['wifi.key']||'';
+    if($('dlProxyIn'))$('dlProxyIn').value=m['webmanager.dl_proxy']||'';
+    if($('dlPeersConf'))$('dlPeersConf').value=m['webmanager.dl_peers']||'';
+    if($('dlUploadEn'))$('dlUploadEn').checked=m['webmanager.dl_upload']!=='0';
+    if($('dlSeedEn'))$('dlSeedEn').checked=m['webmanager.dl_seed']!=='0';
+    if($('dlPortIn'))$('dlPortIn').value=m['webmanager.dl_port']||'6881';
+    refreshIaState();
+  }catch(e){toast(t('err_conf')+e.message,1)}
+}
+function renderSettingsTable(){
+  const q=($('setSearch').value||'').toLowerCase();
+  const rows=confLines.map((l,i)=>({l,i})).filter(({l})=>{
+    if(l.type!=='kv')return false;
+    if(!q)return true;
+    return l.key.toLowerCase().includes(q)||String(l.value).toLowerCase().includes(q);
+  });
+  $('confTable').innerHTML=`<tr><th style="width:280px">${t('th_key')}</th><th>${t('th_value')}</th><th style="width:60px"></th></tr>`+
+    rows.map(({l,i})=>`<tr><td class="kv-key mono">${esc(l.key)}</td>
+      <td><input type="text" style="width:100%" value="${esc(l.value)}" onchange="confLines[${i}].value=this.value"></td>
+      <td><button class="danger" onclick="confLines.splice(${i},1);renderSettingsTable()">${t('del')}</button></td></tr>`).join('');
+}
+function addSettingRow(){
+  const k=prompt(t('prompt_key'));if(!k)return;
+  if(k.includes('=')){toast(t('key_no_eq'),1);return}
+  confLines.push({type:'kv',key:k.trim(),value:''});renderSettingsTable();
+}
+async function saveSettings(){
+  if(!confirm(t('cf_save_conf')))return;
+  try{await post('/api/settings/save',{lines:confLines});toast(t('saved'));loadBackups()}catch(e){toast(e.message,1)}
+}
+function toggleRawConf(){
+  const tx=$('confRaw'),w=$('confTableWrap');
+  if(tx.style.display==='none'){
+    tx.value=confLines.map(l=>l.type==='kv'?l.key+'='+l.value:l.raw).join('\n');
+    tx.style.display='block';w.style.display='none';
+  }else{
+    if(confirm(t('cf_apply_raw'))){
+      confLines=tx.value.split('\n').map(raw=>{
+        const s=raw.trim();
+        if(!s)return{type:'blank',raw};
+        if(s.startsWith('#'))return{type:'comment',raw};
+        const m=raw.match(/^([^=]+?)\s*=\s*(.*)$/);
+        return m?{type:'kv',key:m[1].trim(),value:m[2],raw}:{type:'other',raw};
+      });
+      renderSettingsTable();
+    }
+    tx.style.display='none';w.style.display='block';
+  }
+}
+async function saveWifi(){
+  try{
+    await post('/api/settings/save',{lines:(()=>{confLines=confLines.filter(l=>!(l.type==='kv'&&['wifi.enabled','wifi.ssid','wifi.key'].includes(l.key)));confLines.push({type:'kv',key:'wifi.enabled',value:$('wifiEn').checked?'1':'0'},{type:'kv',key:'wifi.ssid',value:$('wifiSsid').value},{type:'kv',key:'wifi.key',value:$('wifiKey').value});return confLines})()});
+    toast(t('wifi_saved'));
+  }catch(e){toast(e.message,1)}
+}
+async function loadBackups(){
+  try{
+    const j=await api('/api/settings/backups');
+    const conf=j.backups.filter(b=>b.startsWith('batocera.conf.'));
+    const inp=j.backups.filter(b=>b.startsWith('es_input.cfg.'));
+    $('confBackups').innerHTML=`<option value="">${t('sel_conf_bak')}</option>`+conf.map(b=>`<option>${esc(b)}</option>`).join('');
+    $('inputBackups').innerHTML=`<option value="">${t('sel_input_bak')}</option>`+inp.map(b=>`<option>${esc(b)}</option>`).join('');
+  }catch(e){}
+}
+async function restoreConf(){
+  const f=$('confBackups').value;if(!f)return;
+  if(!confirm(t('cf_restore_conf',{f})))return;
+  try{await post('/api/settings/restore',{file:f});toast(t('restored_es'));loadConf()}catch(e){toast(e.message,1)}
+}
+
+// ---------- Gamepads / 手柄 ----------
+let pads=[];
+async function loadPads(){try{const j=await api('/api/controllers');pads=j.devices;renderPads();loadBackups()}catch(e){toast(t('err_pads')+e.message,1)}}
+// Display order: d-pad first, then hotkey/select/start, face buttons, shoulders, sticks, rest last / 显示顺序：十字键优先，其余项最后
+const PAD_ORDER=['up','down','left','right','hotkey','select','start','a','b','x','y','pageup','pagedown','l2','r2','l3','r3','joystick1up','joystick1left','joystick2up','joystick2left'];
+const PAD_RANK=Object.fromEntries(PAD_ORDER.map((n,i)=>[n,i]));
+function inpRank(n){return n in PAD_RANK?PAD_RANK[n]:1000}
+function sortPadInputs(d){d.inputs.sort((a,b)=>{const ra=inpRank(a.name),rb=inpRank(b.name);return ra!==rb?ra-rb:(a.name<b.name?-1:a.name>b.name?1:0)})}
+function padOverlayHtml(d, di){
+  const typeId = padTypeId(d);
+  const type = PAD_TYPES.find(p => p.id === typeId) || PAD_TYPES[0];
+  let visual;
+  if (typeId === 'arcade') {
+    visual = `<div class="pad-overlay-wrap is-svg">${arcadeSvg(d)}</div>`;
+  } else if (typeId === 'keyboard') {
+    visual = `<div class="pad-overlay-wrap is-kb">${keyboardHtml(d)}</div>`;
+  } else if (type.svg) {
+    visual = `<div class="pad-overlay-wrap is-svg">${gamepadSvg(d, type.svg)}</div>`;
+  } else {
+    // Bundled Batocera drawing (all of them share one button template) + binding badges
+    const labels = [];
+    for (const inp of d.inputs || []) {
+      const pos = UNIVERSAL_BUTTONS[inp.name];
+      if (!pos) continue;
+      const axis = String(inp.type || '') === 'axis';
+      labels.push(`<div class="pad-btn-label${axis ? ' is-axis' : ''}" style="left:${pos.x}%;top:${pos.y + 2.6}%" title="${esc(inp.name)} · ${esc(inp.type)} ${esc(inp.id)} = ${esc(inp.value)}">${esc(fmtBinding(inp))}</div>`);
+    }
+    visual = `<div class="pad-overlay-wrap" data-di="${di}">
+        <img src="/api/controller-overlay?name=${esc(type.overlay)}" onerror="this.style.opacity='0.15'">
+        ${labels.join('')}
+      </div>`;
+  }
+  const selOpts = PAD_TYPES.map(p =>
+    `<option value="${p.id}" ${typeId === p.id ? 'selected' : ''}>${esc(t(p.i18n))}</option>`).join('');
+  return `
+    <div class="pad-head">
+      ${visual}
+      <div class="pad-controls">
+        <label>${t('pad_type')}</label>
+        <select class="pad-type" data-di="${di}" onchange="setPadType(${di},this.value)">
+          ${selOpts}
+        </select>
+        <div class="hint" style="margin-top:6px">${t('overlay_hint')}</div>
+        <div class="hint" style="margin-top:4px">${t('pad_bind_hint')}</div>
+      </div>
+    </div>`;
+}
+// ---- Render gamepad cards: overlay visual + binding table / 渲染手柄卡片：布局图示与绑定表格 ----
+function renderPads(){
+  pads.forEach(sortPadInputs);
+  $('padList').innerHTML=pads.map((d,di)=>`
+    <div class="card" style="background:var(--panel2)">
+      <div class="dev-head">
+        <span class="pill">${t('player',{n:di+1})}</span>
+        <span class="name">${esc(d.deviceName)}</span>
+        <span class="hint">${esc(d.type)} · ${esc(d.deviceGUID)}</span>
+      </div>
+      ${padOverlayHtml(d, di)}
+      <table style="margin-top:8px"><tr><th>${t('th_func')}</th><th>${t('th_type')}</th><th>ID</th><th>${t('th_value')}</th><th>code</th></tr>
+      ${d.inputs.map(inp=>`<tr>
+        <td class="mono">${esc(inp.name)}</td>
+        <td class="mono">${esc(inp.type)}</td>
+        <td class="mono" style="white-space:nowrap">${String(inp.type)==='key'
+          ? `<span title="keycode ${esc(inp.id)}">${esc(fmtBinding(inp))}</span> <span class="hint">(${esc(inp.id)})</span>`
+          : esc(inp.id)}</td>
+        <td class="mono">${esc(inp.value)}</td>
+        <td class="mono">${esc(inp.code)}</td></tr>`).join('')}
+      </table>
+    </div>`).join('');
+}
+async function toggleRawInput(){
+  const w=$('padRawWrap');
+  if(w.style.display==='none'){const j=await api('/api/controllers/raw');$('padRaw').value=j.content;w.style.display='block';$('padList').style.display='none'}
+  else{w.style.display='none';$('padList').style.display='block';loadPads()}
+}
+async function restoreInput(){
+  const f=$('inputBackups').value;if(!f)return;
+  if(!confirm(t('cf_restore_input',{f})))return;
+  try{await post('/api/controllers/restore',{file:f});toast(t('restored'));loadPads()}catch(e){toast(e.message,1)}
+}
+
+// ---------- Emulators & Games / 模拟器与游戏 ----------
+let systems=[],curSys=null,curDir='';
+let selectedTypes=new Set();
+// ---- Systems list with type filter / 带类型筛选的系统列表 ----
+async function loadSystems(){
+  try{
+    const j=await api('/api/systems');systems=j.systems.filter(s=>s.romCount>0||s.emulators.length);
+    buildTypeOpts();renderSysList();
+  }catch(e){$('sysItems').innerHTML='<div class="loading">'+esc(e.message)+'</div>'}
+}
+function buildTypeOpts(){
+  // Count systems per type
+  const counts={};
+  systems.forEach(s=>{const t=s.type||'通用';counts[t]=(counts[t]||0)+1});
+  const types=Object.keys(counts).sort((a,b)=>counts[b]-counts[a]);
+  // Default: select all types
+  if(selectedTypes.size===0)types.forEach(t=>selectedTypes.add(t));
+  $('tfOpts').innerHTML=types.map(t=>`<label class="tf-opt">
+    <input type="checkbox" ${selectedTypes.has(t)?'checked':''} onchange="toggleType('${esc(t)}',this.checked)">
+    <span>${esc(t)}</span><span class="tf-n">${counts[t]}</span>
+  </label>`).join('');
+  updateTfCount();
+}
+function updateTfCount(){
+  const total=$('tfOpts').querySelectorAll('.tf-opt').length;
+  const sel=selectedTypes.size;
+  $('tfCount').textContent=sel===total?t('all_types'):sel;
+}
+function toggleType(t,on){
+  if(on)selectedTypes.add(t);else selectedTypes.delete(t);
+  updateTfCount();renderSysList();
+}
+function setTypesAll(all){
+  selectedTypes.clear();
+  if(all){$('tfOpts').querySelectorAll('.tf-opt input').forEach(c=>{c.checked=true;selectedTypes.add(c.parentElement.querySelector('span').textContent)});}
+  else{$('tfOpts').querySelectorAll('.tf-opt input').forEach(c=>c.checked=false);}
+  updateTfCount();renderSysList();
+}
+function toggleTypePanel(e){
+  e.stopPropagation();
+  $('tfPanel').classList.toggle('open');
+}
+document.addEventListener('click',e=>{if(!e.target.closest('.type-filter'))$('tfPanel')?.classList.remove('open')});
+function renderSysList(){
+  const q=($('sysSearch').value||'').toLowerCase();
+  const list=systems.filter(s=>{
+    if(selectedTypes.size&&!selectedTypes.has(s.type||'通用'))return false;
+    return !q||s.name.includes(q)||s.fullname.toLowerCase().includes(q);
+  });
+  $('sysItems').innerHTML=list.map(s=>`<div class="item ${curSys===s.name?'on':''}" onclick="selectSys('${esc(s.name)}')">
+    <span>${esc(s.fullname||s.name)}</span><span class="cnt">${s.romCount||''}</span></div>`).join('')||'<div class="loading">'+t('no_match')+'</div>';
+}
+function coreOptions(s){
+  const opts=[];
+  s.emulators.forEach(e=>e.cores.forEach(c=>opts.push({emu:e.name,core:c.name,def:c.default,label:e.name+' / '+c.name+(c.default?' '+t('default_tag'):'')})));
+  return opts;
+}
+// ---- System detail page: core picker, filters, game table / 系统详情页：核心选择、筛选与游戏表格 ----
+async function selectSys(name){
+  curSys=name;curDir='';dlLimit=300;dlLibs={};renderSysList();
+  const s=systems.find(x=>x.name===name);
+  const opts=coreOptions(s);
+  const curKey=(s.currentEmulator&&s.currentCore)?s.currentEmulator+'|'+s.currentCore:'';
+  const src=!!s.source;
+  $('sysDetail').innerHTML=`
+    <div class="card"><div class="sys-head">
+        <img src="/api/system-art?name=${esc(s.name)}" onerror="this.style.display='none'">
+        <div class="meta">
+          <h2 style="margin:0;color:var(--accent);font-size:15px">${esc(s.fullname)} <span class="pill">${esc(s.name)}</span></h2>
+          <div class="hint" style="margin-top:4px">${esc(s.manufacturer||'')}${s.extensions.length?' · '+s.extensions.join(' '):''}</div>
+        </div>
+        ${src?`<div class="dl-flt">
+          <label><input type="checkbox" id="fltInst" checked onchange="dlLimit=300;loadGames()">${t('dl_installed')}</label>
+          <label><input type="checkbox" id="fltMiss" checked onchange="dlLimit=300;loadGames()">${t('dl_missing')}</label>
+        </div>`:''}
+      </div>
+      <div class="row"><label>${t('core_lbl')}</label>
+        <select id="coreSel" style="min-width:260px">
+          <option value="">${t('sys_default')}</option>
+          ${opts.map(o=>`<option value="${esc(o.emu)}|${esc(o.core)}" ${curKey===o.emu+'|'+o.core?'selected':''}>${esc(o.label)}</option>`).join('')}
+        </select><button onclick="saveCore()">${t('save_core_btn')}</button>
+        ${src?`<input type="text" id="dlSearch" placeholder="${t('dl_search_ph')}" style="width:170px" oninput="dlLimit=300;loadGames()">
+        <button onclick="dlDownloadSelected()">${t('dl_dl_sel')}</button>
+        <button class="danger" onclick="dlStop()">${t('fb_stop')}</button>`:''}
+        <span style="margin-left:auto"></span>
+        <button class="danger" onclick="delSelected()">${t('del_selected')}</button>
+      </div>
+      ${src?`<div id="dlStatus" class="dl-status"></div>`:''}
+      ${src?`<div class="row" id="iaRow" style="display:none;margin-bottom:8px">
+        <span id="iaState" class="hint"></span>
+        <button id="iaGoSet" onclick="document.querySelector('#nav button[data-tab=settings]').click()" style="display:none">${t('dl_go_settings')}</button>
+      </div>`:''}
+      <div class="row" id="scrapeRow" style="margin-bottom:2px">
+        <span id="scrapeInfo" class="hint"></span>
+        <button id="scrapeBtn" onclick="scrapeGo()" style="display:none"></button>
+        <button id="scrapeStopBtn" class="danger" onclick="scrapeStopGo()" style="display:none">${t('fb_stop')}</button>
+      </div>
+      <div class="row"><span id="gameCrumbs"></span></div>
+      <div class="drop" id="gameDrop">${t('drop_games',{ext:s.extensions.join(' ')})}</div>
+      <div id="gameProg"></div>
+      <div style="max-height:calc(100vh - 340px);overflow-y:auto"><table id="gameTable"><tr><td class="loading">${t('loading_games')}</td></tr></table></div>
+      <div class="row" id="dlMore" style="margin-top:8px"></div>
+    </div>`;
+  bindDrop($('gameDrop'),files=>uploadGames(files));
+  loadGames();
+  scrapeRefreshed=false;clearTimeout(scrapePoll);scrapeRefresh();
+}
+// ---- metadata scraping (ScreenScraper, mirrors the ES scraper) / 元数据刮削（ScreenScraper，与 ES 刮削器一致） ----
+let scrapePoll=null, scrapeRefreshed=false;
+function scheduleScrapePoll(){clearTimeout(scrapePoll);scrapePoll=setTimeout(scrapeRefresh,2500)}
+async function scrapeRefresh(){
+  if(!curSys)return;
+  try{
+    const s=await api('/api/scrape/status?system='+encodeURIComponent(curSys));
+    const info=$('scrapeInfo'),btn=$('scrapeBtn'),stop=$('scrapeStopBtn');
+    if(!info)return;
+    const j=s.job;
+    if(j&&j.status==='running'){
+      info.textContent=t('scrape_running',{done:j.done,total:j.total,found:j.found,cur:j.current});
+      btn.style.display='none';stop.style.display='';
+      scheduleScrapePoll();return;
+    }
+    stop.style.display='none';
+    if(j&&(j.status==='done'||j.status==='stopped')){
+      info.textContent=t('scrape_done',{found:j.found,notfound:j.notfound,errors:j.errors});
+      if(j.found>0&&!scrapeRefreshed){scrapeRefreshed=true;loadGames()}
+    }else if(j&&j.status==='error'){
+      info.textContent=j.error;
+    }else if(!s.creds){
+      info.textContent=t('scrape_nocreds');
+    }else{
+      info.textContent=s.missing?t('scrape_missing',{n:s.missing}):t('scrape_all_ok');
+    }
+    btn.style.display=(s.missing&&s.creds&&!(j&&j.status==='running'))?'':'none';
+    btn.textContent=t('scrape_btn',{n:s.missing});
+  }catch(e){}
+}
+async function scrapeGo(){
+  try{await post('/api/scrape/start',{system:curSys});scrapeRefreshed=false;scheduleScrapePoll();scrapeRefresh()}
+  catch(e){toast(e.message,1)}
+}
+async function scrapeStopGo(){
+  try{await post('/api/scrape/stop',{system:curSys})}catch(e){}
+  scheduleScrapePoll();
+}
+async function saveCore(){
+  const v=$('coreSel').value;
+  if(!v){toast(t('core_default_hint',{s:curSys}),0);return}
+  const [emulator,core]=v.split('|');
+  try{await post('/api/systems/emulator',{system:curSys,emulator,core});toast(t('saved'))}catch(e){toast(e.message,1)}
+}
+// ---- Games list + download library rendering / 游戏列表与下载库渲染 ----
+function gameGo(dir){curDir=dir;loadGames()}
+async function loadGames(){
+  try{
+    const s=systems.find(x=>x.name===curSys)||{};
+    const j=await api('/api/games?system='+encodeURIComponent(curSys)+'&dir='+encodeURIComponent(curDir));
+    let lib=null, inst=new Set();
+    if(s.source&&!curDir){lib=await dlLibFor(curSys); if(lib)inst=new Set(lib.installed||[]);}
+    const isHttp=!!(lib&&lib.torrent&&lib.torrent.http);
+    const iaRow=$('iaRow');
+    if(iaRow){
+      iaRow.style.display=isHttp?'':'none';
+      if(isHttp){
+        const authed=!!lib.ia_auth;
+        $('iaState').textContent=authed?t('dl_ia_ok'):t('dl_ia_no');
+        $('iaState').style.color=authed?'var(--ok)':'var(--warn)';
+        $('iaGoSet').style.display=authed?'none':'';
+      }
+    }
+    dlNames=lib?(lib.names||{}):{};
+    const parts=curDir?curDir.split('/'):[];
+    $('gameCrumbs').innerHTML=`<span class="crumb" onclick="gameGo('')">${esc(curSys)}</span>`+
+      parts.map((seg,i)=>` / <span class="crumb" onclick="gameGo('${esc(parts.slice(0,i+1).join('/'))}')">${esc(seg)}</span>`).join('');
+    const q=($('dlSearch')?$('dlSearch').value:'').trim().toLowerCase();
+    const showInst=$('fltInst')?$('fltInst').checked:true;
+    const showMiss=$('fltMiss')?$('fltMiss').checked:true;
+    const match=(...txt)=>!q||txt.join(' ').toLowerCase().includes(q);
+    const tb=$('gameTable');
+    const dirRows=j.dirs.map(d=>`<tr><td></td><td></td><td colspan="3"><span class="crumb" onclick="gameGo('${esc(curDir?curDir+'/'+d:d)}')">📁 ${esc(d)}</span></td><td></td></tr>`);
+    const gameRows=j.games.map(g=>({g,cn:dlNames[g.file.replace(/\.[^.]+$/,'')]||''}))
+      .filter(({g,cn})=>showInst&&match(g.name||'',g.file,cn,g.genre||'')).map(({g,cn})=>{
+      const img=g.image?`/api/media?system=${encodeURIComponent(curSys)}&path=${encodeURIComponent(g.image)}`:'';
+      return `<tr>
+      <td><input type="checkbox" class="gsel" value="${esc(g.rel)}"></td>
+      <td>${img?`<img class="thumb" loading="lazy" src="${img}">`:''}</td>
+      <td>${esc(cn||g.name||'')}<div class="hint">${cn?esc(g.name||'')+' · ':''}${esc(g.genre||'')} ${esc(g.players?t('players',{n:g.players}):'')}</div></td>
+      <td class="mono" style="max-width:260px;overflow:hidden;text-overflow:ellipsis">${esc(g.file)}</td>
+      <td>${fmtSize(g.size)}</td>
+      <td><button onclick="renameGame('${esc(g.rel)}','${esc(g.file)}')">${t('rename')}</button></td></tr>`;
+    });
+    let missRows='', missTotal=0;
+    if(lib&&showMiss){
+      const missing=lib.games.filter(g=>!inst.has(g.n)&&match(g.n,dlNames[g.n]||'',g.t||'',g.y||'',g.m||''));
+      missTotal=missing.length;
+      missRows=missing.slice(0,dlLimit).map(g=>{
+        const cn=dlNames[g.n]||'';
+        const st=dlJob&&dlJob.files?dlJob.files[g.fn||(g.n+'.7z')]:null;
+        const op=st?`<span class="hint">${Math.round(st.got/st.size*100)}%${st.done?' ✓':''}</span>`
+          :dlQueued.has(g.n)?`<span class="hint">${t('dl_queued')}</span>`
+          :`<button data-n="${esc(g.n)}" onclick="dlOne(this.dataset.n)">${t('dl_btn')}</button>`;
+        return `<tr>
+        <td><input type="checkbox" class="dlsel" value="${esc(g.n)}"></td>
+        <td></td>
+        <td>${esc(cn||g.t||g.n)}<div class="hint">${cn&&g.t?esc(g.t)+' · ':''}${esc(g.y||'')}${g.y?' · ':''}${esc(g.m||'')}</div></td>
+        <td class="mono">${esc(g.fn||(g.n+'.7z'))}</td>
+        <td>${fmtSize(g.s)}</td>
+        <td>${op}</td></tr>`;
+      }).join('');
+    }
+    const allRows=dirRows.join('')+gameRows.join('')+missRows;
+    if(!allRows){tb.innerHTML='<tr><td class="loading">'+t('empty_dir')+'</td></tr>';}
+    else tb.innerHTML=`<tr><th style="width:30px"><input type="checkbox" onchange="document.querySelectorAll('.gsel,.dlsel').forEach(c=>c.checked=this.checked)"></th>
+      <th></th><th>${t('th_game')}</th><th>${t('th_file')}</th><th>${t('th_size')}</th><th>${t('th_ops')}</th></tr>`+allRows;
+    if($('dlMore'))$('dlMore').innerHTML=missTotal>dlLimit
+      ?`<button onclick="dlLimit+=300;loadGames()">${t('dl_more')}</button><span class="hint">${t('dl_rest_n',{a:dlLimit,b:missTotal})}</span>`
+      :(missTotal?`<span class="hint">${t('dl_rest_n',{a:missTotal,b:missTotal})}</span>`:'');
+    if(s.source)dlTick();
+  }catch(e){$('gameTable').innerHTML='<tr><td class="loading">'+esc(e.message)+'</td></tr>'}
+}
+// ---------- Drag & drop and upload with progress bar / 拖拽与带进度条的文件上传 ----------
+function bindDrop(el,cb){
+  ['dragover','dragenter'].forEach(ev=>el.addEventListener(ev,e=>{e.preventDefault();el.classList.add('over')}));
+  ['dragleave','drop'].forEach(ev=>el.addEventListener(ev,e=>{e.preventDefault();el.classList.remove('over')}));
+  el.addEventListener('drop',e=>cb(e.dataTransfer.files));
+}
+function uploadWithProgress(url,files,progEl,done){
+  const fd=new FormData();
+  for(const f of files)fd.append('file',f);
+  const x=new XMLHttpRequest();x.open('POST',url);
+  const bar=document.createElement('div');bar.className='prog';bar.innerHTML='<i></i>';
+  const label=document.createElement('div');label.className='hint';label.textContent=t('uploading');
+  progEl.appendChild(label);progEl.appendChild(bar);
+  x.upload.onprogress=e=>{if(e.lengthComputable){const p=Math.round(e.loaded/e.total*100);bar.firstChild.style.width=p+'%';label.textContent=t('uploading_p',{p,a:fmtSize(e.loaded),b:fmtSize(e.total)})}};
+  x.onload=()=>{label.remove();bar.remove();try{const j=JSON.parse(x.responseText);if(j.ok===false)throw new Error(j.error);done(j)}catch(e){toast(e.message,1)}};
+  x.onerror=()=>{label.remove();bar.remove();toast(t('upload_fail'),1)};
+  x.send(fd);
+}
+function uploadGames(files){
+  if(!files.length)return;
+  uploadWithProgress('/api/games/upload?system='+encodeURIComponent(curSys)+'&dir='+encodeURIComponent(curDir),files,$('gameProg'),j=>{
+    toast(t('uploaded',{x:j.uploaded.join(', ')||t('upload_none')}));
+    if(j.autoconfig&&j.autoconfig.length)toast(t('autoconfig_n',{n:j.autoconfig.length}));
+    loadGames();loadSystems();
+  });
+}
+async function delSelected(){
+  const files=[...document.querySelectorAll('.gsel:checked')].map(c=>c.value);
+  if(!files.length){toast(t('no_sel_games'),1);return}
+  if(!confirm(t('cf_del_games',{n:files.length})))return;
+  try{const j=await post('/api/games/delete',{system:curSys,files});toast(t('deleted_n',{n:j.deleted.length}));if(j.errors.length)toast(j.errors.join('; '),1);loadGames();loadSystems()}catch(e){toast(e.message,1)}
+}
+async function renameGame(rel,old){
+  const nw=prompt(t('prompt_newname'),old);if(!nw||nw===old)return;
+  try{await post('/api/games/rename',{system:curSys,rel,new:nw});toast(t('renamed'));loadGames()}catch(e){toast(e.message,1)}
+}
+
+// ---------- BIOS / BIOS 检查与上传 ----------
+async function loadBios(force){
+  if(force)$('biosMissing').innerHTML='<div class="loading">'+t('checking_long')+'</div>';
+  try{
+    const j=await api('/api/bios');
+    $('biosMissing').innerHTML=j.missing.length?
+      `<div class="hint" style="margin-bottom:8px">${t('missing_n',{n:j.missing.length})}</div>
+      <div style="max-height:380px;overflow-y:auto"><table><tr><th>${t('th_system')}</th><th>${t('th_req_path')}</th><th>MD5</th><th>${t('th_upload')}</th></tr>
+      ${j.missing.map(m=>`<tr><td>${esc(m.system)}</td><td class="mono">${esc(m.path)}</td><td class="mono hint">${esc(m.md5)}</td>
+        <td><button onclick="pickBios('${esc(m.path)}')">${t('pick_file')}</button></td></tr>`).join('')}</table></div>`
+      :'<div class="tag-ok">'+t('bios_ok')+'</div>';
+    $('biosTable').innerHTML=`<tr><th>${t('th_path')}</th><th>${t('th_size')}</th></tr>`+
+      j.installed.map(f=>`<tr><td class="mono">${esc(f.path)}</td><td>${fmtSize(f.size)}</td></tr>`).join('');
+  }catch(e){$('biosMissing').innerHTML='<div class="loading">'+esc(e.message)+'</div>'}
+}
+function pickBios(relpath){
+  const inp=document.createElement('input');inp.type='file';
+  inp.onchange=()=>{
+    if(!inp.files.length)return;
+    uploadWithProgress('/api/bios/upload?relpath='+encodeURIComponent(relpath),inp.files,{appendChild:el=>$('biosMissing').appendChild(el)},()=>{toast(t('uploaded',{x:inp.files[0].name}));loadBios(true)});
+  };
+  inp.click();
+}
+function uploadBiosFiles(input){
+  if(!input.files.length)return;
+  uploadWithProgress('/api/bios/upload?relpath='+encodeURIComponent('bios/'+input.files[0].name),input.files,{appendChild:el=>$('biosMissing').appendChild(el)},()=>{toast(t('uploaded',{x:input.files[0].name}));loadBios(true)});
+  input.value='';
+}
+
+// ---------- File Manager / 文件管理器 ----------
+let fmPath='/userdata';
+async function fmGo(p){fmPath=p;try{
+  const j=await api('/api/files?path='+encodeURIComponent(p));
+  fmPath=j.path;
+  const parts=fmPath.split('/').filter(Boolean);
+  $('fileCrumbs').innerHTML='<span class="crumb" onclick="fmGo(\'/userdata\')">userdata</span>'+
+    parts.slice(1).map((seg,i)=>` / <span class="crumb" onclick="fmGo('/${parts.slice(0,i+2).join('/')}')">${esc(seg)}</span>`).join('');
+  $('fmTable').innerHTML=`<tr><th style="width:30px"></th><th>${t('th_name')}</th><th>${t('th_size')}</th><th>${t('th_mtime')}</th><th>${t('th_ops')}</th></tr>`+
+    (fmPath!=='/userdata'?`<tr><td></td><td colspan="4"><span class="crumb" onclick="fmGo('${esc(fmPath.split('/').slice(0,-1).join('/')||'/userdata')}')">${t('up_one')}</span></td></tr>`:'')+
+    j.entries.map(e=>`<tr>
+      <td><input type="checkbox" class="fsel" value="${esc(fmPath+'/'+e.name)}"></td>
+      <td>${e.isDir?`<span class="crumb" onclick="fmGo('${esc(fmPath+'/'+e.name)}')">📁 ${esc(e.name)}</span>`:esc(e.name)}</td>
+      <td>${e.isDir?'':fmtSize(e.size)}</td>
+      <td class="hint">${e.mtime?new Date(e.mtime*1000).toLocaleString():''}</td>
+      <td>${e.isDir?'':`<button onclick="location.href='/api/files/download?path=${encodeURIComponent(fmPath+'/'+e.name)}'">${t('download')}</button>`}
+          <button onclick="fmRename('${esc(fmPath+'/'+e.name)}','${esc(e.name)}')">${t('rename')}</button></td></tr>`).join('');
+}catch(e){toast(e.message,1)}}
+async function fmDelete(){
+  const paths=[...document.querySelectorAll('.fsel:checked')].map(c=>c.value);
+  if(!paths.length){toast(t('no_sel'),1);return}
+  if(!confirm(t('cf_del_files',{n:paths.length})))return;
+  try{const j=await post('/api/files/delete',{paths});toast(t('deleted_n',{n:j.deleted.length}));if(j.errors.length)toast(j.errors.join('; '),1);fmGo(fmPath)}catch(e){toast(e.message,1)}
+}
+async function fmRename(p,old){
+  const nw=prompt(t('prompt_rename'),old);if(!nw||nw===old)return;
+  try{await post('/api/files/rename',{path:p,new:nw});fmGo(fmPath)}catch(e){toast(e.message,1)}
+}
+async function fmMkdir(){
+  const nw=prompt(t('prompt_mkdir'));if(!nw)return;
+  try{await post('/api/files/mkdir',{path:fmPath,name:nw});fmGo(fmPath)}catch(e){toast(e.message,1)}
+}
+function fmUpload(input){
+  if(!input.files.length)return;
+  uploadWithProgress('/api/files/upload?path='+encodeURIComponent(fmPath),input.files,$('fmProg'),()=>{toast(t('uploaded',{x:[...input.files].map(f=>f.name).join(', ')}));fmGo(fmPath)});
+  input.value='';
+}
+bindDrop($('fmDrop'),files=>uploadWithProgress('/api/files/upload?path='+encodeURIComponent(fmPath),files,$('fmProg'),()=>{toast(t('uploaded',{x:[...files].map(f=>f.name).join(', ')}));fmGo(fmPath)}));
+
+// ---------- BT download of missing games (merged into the games page) / 缺失游戏的 BT 下载（已合并进游戏页面） ----------
+let dlLibs={}, dlNames={}, dlJob=null, dlQueued=new Set(), dlPoll=null, dlWasActive=false, dlLimit=300;
+// ---- Fetch & cache the per-system download library / 获取并缓存指定系统的下载库 ----
+async function dlLibFor(sys){
+  const key=sys+'|'+lang;
+  if(!dlLibs[key]){
+    try{dlLibs[key]=await api('/api/dl/library?system='+encodeURIComponent(sys)+'&lang='+encodeURIComponent(lang))}catch(e){toast(t('dl_load_err')+e.message,1);return null}
+  }
+  return dlLibs[key];
+}
+async function dlOne(n){dlPost([n])}
+function dlDownloadSelected(){
+  const names=[...document.querySelectorAll('.dlsel:checked')].map(c=>c.value);
+  if(!names.length){toast(t('fb_none_sel'),1);return}
+  dlPost(names);
+}
+// ---- Queue selected games for download / 将选中游戏加入下载队列 ----
+async function dlPost(names){
+  try{
+    await post('/api/dl/download',{system:curSys,games:names.slice(0,200)});
+    toast(t('dl_added',{n:names.length}));
+    await dlTick();
+    loadGames();
+  }catch(e){toast(e.message,1)}
+}
+async function dlStop(){
+  try{await post('/api/dl/stop',{system:curSys});toast(t('dl_stopped'));await dlTick();loadGames()}catch(e){toast(e.message,1)}
+}
+async function dlClean(){
+  try{
+    const r=await post('/api/dl/clean',{system:curSys});
+    toast(t('dl_cleaned',{n:r.removed,s:fmtSize(r.freed)}));
+    delete dlLibs[curSys+'|'+lang];
+    await dlTick();loadGames();
+  }catch(e){toast(e.message,1)}
+}
+// ---- Poll download status and render the status panel / 轮询下载状态并渲染状态面板 ----
+async function dlTick(){
+  const box=$('dlStatus');
+  if(!curSys||!box){if(dlPoll){clearInterval(dlPoll);dlPoll=null;dlWasActive=false}return}
+  let j;
+  try{j=await api('/api/dl/status?system='+encodeURIComponent(curSys))}catch(e){return}
+  if(!$('dlStatus'))return;
+  dlJob=j.job||null; dlQueued=new Set(j.queue_names||[]);
+  let html='';
+  if(dlJob&&dlJob.status==='seeding'){
+    if(dlWasActive){dlWasActive=false;delete dlLibs[curSys+'|'+lang];loadGames()}
+    html=`<div>${t('dl_seeding')} · ${t('dl_seeding_up',{s:fmtSize(dlJob.up_speed),n:dlJob.peers})}</div>`;
+    html+=Object.entries(dlJob.files||{}).map(([f,v])=>`<div class="hint">${esc(f)} ${fmtSize(v.got)}/${fmtSize(v.size)} ✓</div>`).join('');
+  }else if(dlJob){
+    const pct=dlJob.bytes_total?Math.round(dlJob.bytes_done/dlJob.bytes_total*100):0;
+    html=`<div class="bar" style="max-width:560px"><i style="width:${pct}%"></i></div>
+      <div>${t('fb_stat_line',{p:pct,a:fmtSize(dlJob.bytes_done),b:fmtSize(dlJob.bytes_total),s:fmtSize(dlJob.speed)+'/s',peers:j.torrent&&j.torrent.http?'-':dlJob.peers})}${dlQueued.size?' · '+t('dl_queued_n',{n:dlQueued.size}):''}</div>`;
+    if(dlJob.error)html+=`<div class="tag-danger">${esc(dlJob.error)}</div>`;
+    html+=Object.entries(dlJob.files||{}).map(([f,v])=>`<div class="hint">${esc(f)} ${fmtSize(v.got)}/${fmtSize(v.size)}${v.done?' ✓':''}</div>`).join('');
+  }else if(dlQueued.size){
+    html=`<div>${t('dl_queued_n',{n:dlQueued.size})}</div>`;
+  }
+  const lib=dlLibs[curSys+'|'+lang];
+  const res=(lib&&lib.residue)||[];
+  if(res.length&&!dlJob){
+    const sz=res.reduce((a,r)=>a+r.size,0);
+    html+=`<div class="row" style="margin-top:6px"><span class="hint">${t('dl_residue',{n:res.length,s:fmtSize(sz)})}</span><button class="danger" onclick="dlClean()">${t('dl_clean_btn')}</button></div>`;
+  }
+  box.innerHTML=html;
+  const active=!!dlJob||dlQueued.size>0;
+  if(active){
+    dlWasActive=true;
+    if(!dlPoll)dlPoll=setInterval(dlTick,2000);
+  }else{
+    if(dlPoll){clearInterval(dlPoll);dlPoll=null}
+    if(dlWasActive){dlWasActive=false;delete dlLibs[curSys+'|'+lang];loadGames()}
+  }
+}
+
+// Show page immediately with fallback strings, then overlay with real translations + overlay list. / 先用兜底文案渲染页面，再异步加载完整翻译与覆盖图列表
+applyLang();
+Promise.all([loadLocale(), loadOverlayList()]).then(()=>{applyLang(); loadDash()});
+</script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+{"system":"cdogs","source":"batocera-store: ports-cdogs-1.5.0-2-any.pkg.tar.zst","http":{"base":"https://store.batocera.org/"},"games":[{"n":"cdogs","f":"ports-cdogs-1.5.0-2-any.pkg.tar.zst","s":32040710,"t":"C-Dogs SDL","r":"World","fn":"ports-cdogs-1.5.0-2-any.pkg.tar.zst","extract":{"fmt":"tar","prefix":"userdata/roms/cdogs/"}}]}

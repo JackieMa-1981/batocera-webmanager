@@ -1,0 +1,1 @@
+{"system":"hurrican","source":"batocera-store: ports-hurrican-1.0.1-1-any.pkg.tar.zst","http":{"base":"https://store.batocera.org/"},"games":[{"n":"hurrican","f":"ports-hurrican-1.0.1-1-any.pkg.tar.zst","s":42095253,"t":"Hurrican","r":"World","fn":"ports-hurrican-1.0.1-1-any.pkg.tar.zst","extract":{"fmt":"tar","prefix":"userdata/roms/hurrican/"}}]}
