@@ -610,15 +610,12 @@ function arcadeSvg(d) {
     const n = canonName(inp.name);
     vals[n] = fmtBinding(inp); types[n] = inp.type;
   }
-  // hotkey often shares the select button on arcade sticks — merge the label then
-  const hkMerged = vals.hotkey && vals.hotkey === vals.select;
   const parts = [`<svg viewBox="0 0 440 236" xmlns="http://www.w3.org/2000/svg">`,
     `<rect x="1" y="1" width="438" height="234" rx="14" fill="#1b2029" stroke="#2e3542"/>`,
     `<circle cx="78" cy="120" r="52" fill="none" stroke="#2e3542"/>`,
     `<circle cx="78" cy="120" r="30" fill="#232936" stroke="#39414f"/>`,
     `<text x="78" y="124" text-anchor="middle" font-size="10" fill="#7d8899">STICK</text>`];
   for (const [name, cx, cy, r] of ARCADE_SLOTS) {
-    if (name === 'hotkey' && hkMerged) continue;
     const v = vals[name];
     const bound = !!v;
     const axis = bound && String(types[name]) === 'axis';
@@ -626,7 +623,7 @@ function arcadeSvg(d) {
     // hat 十字键只显示符号，数值无意义
     const compact = String(types[name]) === 'hat';
     const gcy = bound && !compact ? cy - 1 : cy + 3;
-    const label = name === 'select' && hkMerged && r >= 14 ? fnShort(name) + '·' + fnShort('hotkey') : fnShort(name);
+    const label = fnShort(name);
     parts.push(`<g><title>${esc(name)}${bound ? ' = ' + esc(v) : ''}</title>`,
       `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${bound ? '#26303f' : '#1e232c'}" stroke="${bound ? (axis ? '#e6a23c' : '#4da3ff') : '#39414f'}" stroke-width="1.4"/>`,
       `<text x="${cx}" y="${gcy}" text-anchor="middle" font-size="${r > 15 ? 9 : 8}" fill="${bound ? '#8b96a5' : '#5a6372'}">${esc(label)}</text>`,
@@ -748,15 +745,10 @@ function gamepadSvg(d, kind) {
     vals[n] = fmtBinding(inp);
     types[n] = inp.type;
   }
-  const hkMerged = vals.hotkey && vals.hotkey === vals.select;
-  // merging the SELECT·HOTKEY caption needs a wide circle; small ones keep both slots
-  const selSlot = art.slots.find(s => s[0] === 'select');
-  const mergeHK = hkMerged && !!selSlot && selSlot[3] >= 14;
   const parts = [`<svg viewBox="0 0 ${art.w} ${art.h}" xmlns="http://www.w3.org/2000/svg">`,
     `<rect x="1" y="1" width="${art.w - 2}" height="${art.h - 2}" rx="14" fill="#1b2029" stroke="#2e3542"/>`,
     art.body, ...art.deco];
   for (const [name, cx, cy, r, lbl] of art.slots) {
-    if (name === 'hotkey' && mergeHK) continue;
     const v = vals[name];
     const bound = !!v;
     const axis = bound && String(types[name]) === 'axis';
@@ -764,9 +756,7 @@ function gamepadSvg(d, kind) {
     // the binding text, so they show the glyph only; the tooltip keeps the value.
     // 小圆与 hat 十字键只显示符号，绑定值放在 tooltip 中。
     const compact = r < 12 || String(types[name]) === 'hat';
-    let label = lbl || (name === 'select' && mergeHK
-      ? fnShort(name) + '·' + fnShort('hotkey')
-      : (art.glyphs[name] || fnShort(name)));
+    let label = lbl || art.glyphs[name] || fnShort(name);
     if (!lbl && r < 12) label = SMALL_LABEL[name] || art.glyphs[name] || label;
     const fsL = compact ? 8 : r >= 15 ? 9 : 8;
     const fsV = r >= 15 ? 10 : 9;
