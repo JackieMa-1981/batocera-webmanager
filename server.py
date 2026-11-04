@@ -2346,6 +2346,17 @@ class Handler(BaseHTTPRequestHandler):
             with open(ES_INPUT_PATH, "w", encoding="utf-8") as f:
                 f.write(content)
             return self._json({"ok": True})
+        if path == "/api/controllers/delete":
+            data = self._read_json()
+            guid = str(data.get("deviceGUID", ""))
+            name = str(data.get("deviceName", ""))
+            devices = read_controllers()
+            kept = [d for d in devices
+                    if not (d.get("deviceGUID") == guid and d.get("deviceName") == name)]
+            if len(kept) == len(devices):
+                return self._error("device not found", 404)
+            save_controllers(kept)
+            return self._json({"ok": True, "removed": len(devices) - len(kept)})
         if path == "/api/controllers/restore":
             data = self._read_json()
             name = os.path.basename(str(data.get("file", "")))

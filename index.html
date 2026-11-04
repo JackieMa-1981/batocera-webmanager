@@ -268,14 +268,20 @@ input.inp.w{width:110px}
 
   <!-- Gamepads / 手柄 -->
   <div class="tab" id="tab-pads">
-    <div class="card"><h2><span data-i18n="pads_title">Configured Gamepads</span> <span class="hint" data-i18n="pads_readonly">(read-only view — edit mappings in ES: Main Menu → Controller Settings)</span></h2>
+    <div class="card"><h2><span data-i18n="pads_title">Configured Gamepads</span> <span class="hint" data-i18n="pads_readonly">(edit below or in ES: Main Menu → Controller Settings — restart ES to apply)</span></h2>
       <div class="row">
-        <button onclick="toggleRawInput()" data-i18n="view_xml">View Raw XML</button>
+        <button onclick="toggleRawInput()" data-i18n="view_xml">Edit Raw XML</button>
         <select id="inputBackups"></select>
         <button onclick="restoreInput()" data-i18n="restore_backup">Restore Backup</button>
       </div>
       <div id="padList"></div>
-      <div id="padRawWrap" style="display:none"><textarea class="raw" id="padRaw" readonly></textarea></div>
+      <div id="padRawWrap" style="display:none">
+        <div class="row" style="margin-top:10px">
+          <button class="primary" onclick="saveRawInput()" data-i18n="save_xml">Save XML</button>
+          <span class="hint" data-i18n="xml_hint">Edits es_input.cfg directly — auto-backup before save; restart ES to apply.</span>
+        </div>
+        <textarea class="raw" id="padRaw"></textarea>
+      </div>
     </div>
   </div>
 
@@ -374,11 +380,14 @@ const FALLBACK_LOCALE = {
   xml_saved:'XML saved', cf_restore_input:'Overwrite the current gamepad config with backup {f}?',
   restored:'Restored', err_pads:'Gamepad read: ',
   pad_type:'Controller Type', overlay_hint:'Pick a controller type to display its button layout.',
-  pads_readonly:'(read-only view — edit mappings in ES: Main Menu → Controller Settings)',
-  view_xml:'View Raw XML',
-  pad_ps:'Sony PlayStation', pad_xbox:'Xbox', pad_nintendo:'Nintendo', pad_steam:'Steam Controller',
+  pads_readonly:'(edit below or in ES: Main Menu → Controller Settings — restart ES to apply)',
+  view_xml:'Edit Raw XML', save_xml:'Save XML',
+  xml_hint:'Edits es_input.cfg directly — auto-backup before save; restart ES to apply.',
+   del_device:'Delete Controller', dev_deleted:'Controller deleted',
+  cf_delete_dev:'Delete all mappings of controller "{n}"?',
+  pad_ps:'SONY PlayStation Series', pad_xbox:'MicroSoft XBox Series', pad_nintendo:'Nintendo Series', pad_steam:'Steam Controller',
   bad_key:'Unknown key name',
-  pad_arcade:'Arcade Stick (12 buttons)', pad_keyboard:'Keyboard (104 keys)',
+  pad_arcade:'Arcade Stick', pad_keyboard:'Keyboard (104 keys)',
   clear_overlay_pos:'Reset positions',
   clean_upgrade:'Clean Old Upgrade Downloads', clean_upgrade_desc:'Transmission BT keeps boot-*.tar.xz files after upgrades. Removing them frees space needed for the next upgrade.',
   clean_upgrade_btn:'Clean Old Boot Tarballs', torrent_empty:'No upgrade downloads to clean.',
@@ -543,7 +552,7 @@ function fmtBinding(inp){
 const PAD_TYPES = [
   { id: 'playstation', i18n: 'pad_ps',       svg: 'ps' },   // PS1 → PS5 (identical layout)
   { id: 'xbox',        i18n: 'pad_xbox',     svg: 'xbox' },
-  { id: 'nintendo',    i18n: 'pad_nintendo', svg: 'sfc' },
+  { id: 'nintendo',    i18n: 'pad_nintendo', svg: 'ngc' },   // GameCube layout (left stick + C-stick)
   { id: 'steam',       i18n: 'pad_steam',    svg: 'steam' },
   { id: 'arcade',      i18n: 'pad_arcade' },                 // 1 stick + 12 buttons
   { id: 'keyboard',    i18n: 'pad_keyboard' },               // 104-key keyboard
@@ -570,6 +579,22 @@ const FN_SHORT = {
   joystick2up: 'J2▲', joystick2down: 'J2▼', joystick2left: 'J2◀', joystick2right: 'J2▶',
 };
 function fnShort(n) { return FN_SHORT[n] || n; }
+// EmuELEC's ES build names the same physical controls differently; map them onto
+// the Batocera names used by the drawings so sticks/triggers highlight there too.
+// EmuELEC 的 ES 分支输入名不同，这里统一映射到图示使用的名称。
+const INP_ALIAS = {
+  leftanalogup: 'joystick1up', leftanalogdown: 'joystick1down',
+  leftanalogleft: 'joystick1left', leftanalogright: 'joystick1right',
+  rightanalogup: 'joystick2up', rightanalogdown: 'joystick2down',
+  rightanalogleft: 'joystick2left', rightanalogright: 'joystick2right',
+  leftthumb: 'l3', rightthumb: 'r3',
+  leftshoulder: 'pageup', rightshoulder: 'pagedown',
+  lefttrigger: 'l2', righttrigger: 'r2', hotkeyenable: 'hotkey',
+};
+function canonName(n) { return INP_ALIAS[n] || n; }
+// Shorter captions for the smallest circles (START does not fit a r<12 slot)
+// 最小圆里的短标签（START 放不进 r<12 的圆）
+const SMALL_LABEL = { start: 'ST' };
 
 // ---- Arcade stick: one 8-way stick, select/start on top, two rows of 5 / 街机摇杆图示 ----
 // Slot table: [ES input name, cx, cy, radius]
@@ -580,8 +605,11 @@ const ARCADE_SLOTS = [
   ['a', 184, 142, 18], ['b', 228, 142, 18], ['pagedown', 272, 142, 18], ['r2', 316, 142, 18], ['r3', 360, 142, 18],
 ];
 function arcadeSvg(d) {
-  const vals = {};
-  for (const inp of d.inputs || []) vals[inp.name] = fmtBinding(inp);
+  const vals = {}, types = {};
+  for (const inp of d.inputs || []) {
+    const n = canonName(inp.name);
+    vals[n] = fmtBinding(inp); types[n] = inp.type;
+  }
   // hotkey often shares the select button on arcade sticks — merge the label then
   const hkMerged = vals.hotkey && vals.hotkey === vals.select;
   const parts = [`<svg viewBox="0 0 440 236" xmlns="http://www.w3.org/2000/svg">`,
@@ -593,13 +621,16 @@ function arcadeSvg(d) {
     if (name === 'hotkey' && hkMerged) continue;
     const v = vals[name];
     const bound = !!v;
-    const axis = bound && String((d.inputs || []).find(i => i.name === name)?.type) === 'axis';
-    const gcy = bound ? cy - 1 : cy + 3;
-    const label = name === 'select' && hkMerged ? fnShort(name) + '·' + fnShort('hotkey') : fnShort(name);
+    const axis = bound && String(types[name]) === 'axis';
+    // hat-bound d-pad arms show the glyph only (the numeric value is meaningless there)
+    // hat 十字键只显示符号，数值无意义
+    const compact = String(types[name]) === 'hat';
+    const gcy = bound && !compact ? cy - 1 : cy + 3;
+    const label = name === 'select' && hkMerged && r >= 14 ? fnShort(name) + '·' + fnShort('hotkey') : fnShort(name);
     parts.push(`<g><title>${esc(name)}${bound ? ' = ' + esc(v) : ''}</title>`,
       `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${bound ? '#26303f' : '#1e232c'}" stroke="${bound ? (axis ? '#e6a23c' : '#4da3ff') : '#39414f'}" stroke-width="1.4"/>`,
       `<text x="${cx}" y="${gcy}" text-anchor="middle" font-size="${r > 15 ? 9 : 8}" fill="${bound ? '#8b96a5' : '#5a6372'}">${esc(label)}</text>`,
-      bound ? `<text x="${cx}" y="${cy + 9}" text-anchor="middle" font-size="${r > 15 ? 10 : 9}" font-weight="700" fill="${axis ? '#e6a23c' : '#4da3ff'}">${esc(v)}</text>` : '',
+      bound && !compact ? `<text x="${cx}" y="${cy + 9}" text-anchor="middle" font-size="${r > 15 ? 10 : 9}" font-weight="700" fill="${axis ? '#e6a23c' : '#4da3ff'}">${esc(v)}</text>` : '',
       `</g>`);
   }
   parts.push('</svg>');
@@ -611,53 +642,64 @@ function arcadeSvg(d) {
 // accent highlight + binding value on bound inputs.
 // Per kind: viewBox size, body outline, decorative wells, glyph overrides,
 // slot table [ES input name, cx, cy, radius].
+// Analog sticks are drawn as a ring of four direction slots (J1/J2 up-down-left-
+// right) around a centre click slot (L3/R3), so pads that have sticks show them
+// on the body just like the real hardware.
+// 模拟摇杆画成「四方向环 + 中心按下(L3/R3)」，带摇杆的手柄因此能在示意图中体现。
+const STICK1 = ['joystick1up', 'joystick1down', 'joystick1left', 'joystick1right'];
+const STICK2 = ['joystick2up', 'joystick2down', 'joystick2left', 'joystick2right'];
+const STICK_GLYPH = ['▲', '▼', '◀', '▶'];
+function stickCluster(cx, cy, R, rd, rc, names, click) {
+  const dist = R - rd;
+  return {
+    deco: `<circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="#2e3542"/>`
+        + `<circle cx="${cx}" cy="${cy}" r="${R - rd - 2}" fill="none" stroke="#262d38"/>`,
+    slots: [
+      [names[0], cx, cy - dist, rd, STICK_GLYPH[0]],
+      [names[1], cx, cy + dist, rd, STICK_GLYPH[1]],
+      [names[2], cx - dist, cy, rd, STICK_GLYPH[2]],
+      [names[3], cx + dist, cy, rd, STICK_GLYPH[3]],
+      [click, cx, cy, rc],
+    ],
+  };
+}
 const GAMEPAD_ART = {
   ps: {
     w: 440, h: 300,
-    body: `<path d="M100,52 h240 q32,0 40,38 l16,82 q8,46 -26,60 q-34,14 -54,-22 l-10,-22 h-192 l-10,22 q-20,36 -54,22 q-34,-14 -26,-60 l16,-82 q8,-38 40,-38 z" fill="#232936" stroke="#39414f" stroke-width="1.5"/>`,
+    body: `<path d="M100,60 h240 q32,0 40,38 l16,84 q8,48 -26,62 q-34,14 -54,-22 l-10,-22 h-192 l-10,22 q-20,36 -54,22 q-34,-14 -26,-62 l16,-84 q8,-38 40,-38 z" fill="#232936" stroke="#39414f" stroke-width="1.5"/>`,
     deco: [
       `<circle cx="104" cy="141" r="32" fill="none" stroke="#2e3542"/>`,
-      `<circle cx="340" cy="127" r="34" fill="none" stroke="#2e3542"/>`,
-      `<circle cx="172" cy="214" r="27" fill="none" stroke="#2e3542"/>`,
-      `<circle cx="268" cy="214" r="27" fill="none" stroke="#2e3542"/>`],
+      `<circle cx="340" cy="127" r="34" fill="none" stroke="#2e3542"/>`],
     glyphs: { y: '△', x: '□', b: '○', a: '✕' },
     slots: [
       ['l2', 96, 30, 13], ['pageup', 96, 62, 14], ['r2', 344, 30, 13], ['pagedown', 344, 62, 14],
       ['up', 104, 116, 13], ['down', 104, 166, 13], ['left', 79, 141, 13], ['right', 129, 141, 13],
       ['y', 340, 100, 15], ['x', 313, 127, 15], ['b', 367, 127, 15], ['a', 340, 154, 15],
-      ['select', 192, 128, 10], ['start', 248, 128, 10], ['hotkey', 220, 156, 10],
-      ['l3', 172, 214, 20], ['r3', 268, 214, 20]],
+      ['select', 192, 118, 10], ['start', 248, 118, 10], ['hotkey', 220, 148, 10]],
   },
   xbox: {
     w: 440, h: 300,
     body: `<path d="M80,55 h280 q40,0 50,60 q8,55 -10,105 q-15,42 -55,38 q-32,-3 -45,-28 h-140 q-13,25 -45,28 q-40,4 -55,-38 q-18,-50 -10,-105 q10,-60 50,-60 z" fill="#232936" stroke="#39414f" stroke-width="1.5"/>`,
     deco: [
-      `<circle cx="118" cy="116" r="27" fill="none" stroke="#2e3542"/>`,
       `<circle cx="118" cy="214" r="30" fill="none" stroke="#2e3542"/>`,
-      `<circle cx="330" cy="114" r="34" fill="none" stroke="#2e3542"/>`,
-      `<circle cx="252" cy="206" r="27" fill="none" stroke="#2e3542"/>`],
+      `<circle cx="330" cy="114" r="34" fill="none" stroke="#2e3542"/>`],
     glyphs: {},
     slots: [
       ['l2', 96, 24, 13], ['pageup', 142, 44, 14], ['r2', 344, 24, 13], ['pagedown', 298, 44, 14],
-      ['l3', 118, 116, 20],
       ['up', 118, 190, 11], ['down', 118, 238, 11], ['left', 94, 214, 11], ['right', 142, 214, 11],
       ['y', 330, 88, 15], ['x', 303, 114, 15], ['b', 357, 114, 15], ['a', 330, 140, 15],
-      ['r3', 252, 206, 20],
       ['select', 196, 96, 10], ['start', 246, 96, 10], ['hotkey', 221, 134, 12]],
   },
-  sfc: {
-    w: 440, h: 250,
-    body: `<path d="M100,62 h240 a72,72 0 0 1 72,72 a72,72 0 0 1 -72,72 h-240 a72,72 0 0 1 -72,-72 a72,72 0 0 1 72,-72 z" fill="#232936" stroke="#39414f" stroke-width="1.5"/>`,
-    deco: [
-      `<circle cx="110" cy="134" r="32" fill="none" stroke="#2e3542"/>`,
-      `<circle cx="330" cy="134" r="36" fill="none" stroke="#2e3542"/>`,
-      `<rect x="170" y="126" width="100" height="34" rx="17" fill="none" stroke="#2e3542"/>`],
+  ngc: {
+    w: 440, h: 290,
+    body: `<path d="M96,58 h248 q36,0 44,44 l18,84 q6,34 -26,44 q-30,10 -46,-14 l-4,-8 h-224 l-4,8 q-16,24 -46,14 q-32,-10 -26,-44 l18,-84 q8,-44 44,-44 z" fill="#232936" stroke="#39414f" stroke-width="1.5"/>`,
+    deco: [`<circle cx="100" cy="180" r="24" fill="none" stroke="#2e3542"/>`],
     glyphs: {},
     slots: [
-      ['pageup', 96, 30, 15], ['pagedown', 344, 30, 15],
-      ['up', 110, 110, 13], ['down', 110, 158, 13], ['left', 86, 134, 13], ['right', 134, 134, 13],
-      ['x', 330, 102, 15], ['y', 304, 128, 15], ['a', 356, 128, 15], ['b', 330, 154, 15],
-      ['select', 196, 143, 9], ['start', 244, 143, 9], ['hotkey', 220, 172, 8]],
+      ['l2', 86, 26, 13], ['pageup', 134, 40, 14], ['r2', 354, 26, 13], ['pagedown', 306, 40, 14],
+      ['up', 100, 164, 8], ['down', 100, 196, 8], ['left', 84, 180, 8], ['right', 116, 180, 8],
+      ['a', 318, 118, 17], ['b', 284, 92, 12], ['y', 318, 70, 11], ['x', 350, 92, 12],
+      ['select', 186, 148, 9], ['start', 250, 148, 9], ['hotkey', 218, 176, 9]],
   },
   steam: {
     w: 440, h: 260,
@@ -682,32 +724,56 @@ const GAMEPAD_ART = {
       ['select', 204, 184, 9], ['start', 236, 184, 9], ['hotkey', 220, 208, 10]],
   },
 };
+// Attach the analog stick rings: [cx, cy, ringR, dirR, clickR, 1|2, clickName]
+const STICK_LAYOUT = {
+  ps:  [[176, 162, 32, 10, 11, 1, 'l3'], [276, 162, 32, 10, 11, 2, 'r3']],
+  xbox:[[118, 120, 32, 10, 11, 1, 'l3'], [258, 188, 32, 10, 11, 2, 'r3']],
+  ngc: [[150, 130, 30, 9, 9, 1, 'l3'], [302, 172, 23, 8, 8, 2, 'r3']],
+};
+for (const kind in STICK_LAYOUT) {
+  const art = GAMEPAD_ART[kind];
+  for (const [cx, cy, R, rd, rc, which, click] of STICK_LAYOUT[kind]) {
+    const c = stickCluster(cx, cy, R, rd, rc, which === 1 ? STICK1 : STICK2, click);
+    art.deco.push(c.deco);
+    art.slots.push(...c.slots);
+  }
+}
+
 function gamepadSvg(d, kind) {
   const art = GAMEPAD_ART[kind];
   if (!art) return arcadeSvg(d);
   const vals = {}, types = {};
   for (const inp of d.inputs || []) {
-    vals[inp.name] = fmtBinding(inp);
-    types[inp.name] = inp.type;
+    const n = canonName(inp.name);
+    vals[n] = fmtBinding(inp);
+    types[n] = inp.type;
   }
   const hkMerged = vals.hotkey && vals.hotkey === vals.select;
+  // merging the SELECT·HOTKEY caption needs a wide circle; small ones keep both slots
+  const selSlot = art.slots.find(s => s[0] === 'select');
+  const mergeHK = hkMerged && !!selSlot && selSlot[3] >= 14;
   const parts = [`<svg viewBox="0 0 ${art.w} ${art.h}" xmlns="http://www.w3.org/2000/svg">`,
     `<rect x="1" y="1" width="${art.w - 2}" height="${art.h - 2}" rx="14" fill="#1b2029" stroke="#2e3542"/>`,
     art.body, ...art.deco];
-  for (const [name, cx, cy, r] of art.slots) {
-    if (name === 'hotkey' && hkMerged) continue;
+  for (const [name, cx, cy, r, lbl] of art.slots) {
+    if (name === 'hotkey' && mergeHK) continue;
     const v = vals[name];
     const bound = !!v;
     const axis = bound && String(types[name]) === 'axis';
-    const label = name === 'select' && hkMerged
+    // Tiny circles (stick directions / clicks) and hat d-pad arms have no room for
+    // the binding text, so they show the glyph only; the tooltip keeps the value.
+    // 小圆与 hat 十字键只显示符号，绑定值放在 tooltip 中。
+    const compact = r < 12 || String(types[name]) === 'hat';
+    let label = lbl || (name === 'select' && mergeHK
       ? fnShort(name) + '·' + fnShort('hotkey')
-      : (art.glyphs[name] || fnShort(name));
-    const fsL = r > 15 ? 9 : r > 10 ? 8 : 6;
-    const fsV = r > 15 ? 10 : r > 10 ? 9 : 7;
+      : (art.glyphs[name] || fnShort(name)));
+    if (!lbl && r < 12) label = SMALL_LABEL[name] || art.glyphs[name] || label;
+    const fsL = compact ? 8 : r >= 15 ? 9 : 8;
+    const fsV = r >= 15 ? 10 : 9;
     parts.push(`<g><title>${esc(name)}${bound ? ' = ' + esc(v) : ''}</title>`,
       `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${bound ? '#26303f' : '#1e232c'}" stroke="${bound ? (axis ? '#e6a23c' : '#4da3ff') : '#39414f'}" stroke-width="1.4"/>`,
-      `<text x="${cx}" y="${bound ? cy - 1 : cy + 3}" text-anchor="middle" font-size="${fsL}" fill="${bound ? '#8b96a5' : '#5a6372'}">${esc(label)}</text>`,
-      bound ? `<text x="${cx}" y="${cy + Math.max(6, r * 0.55)}" text-anchor="middle" font-size="${fsV}" font-weight="700" fill="${axis ? '#e6a23c' : '#4da3ff'}">${esc(v)}</text>` : '',
+      `<text x="${cx}" y="${compact ? cy + 2.8 : bound ? cy - 1 : cy + 3}" text-anchor="middle" font-size="${fsL}" fill="${bound ? '#8b96a5' : '#5a6372'}">${esc(label)}</text>`,
+      bound && !compact ? `<text x="${cx}" y="${cy + Math.max(6, r * 0.55)}" text-anchor="middle" font-size="${fsV}" font-weight="700" fill="${axis ? '#e6a23c' : '#4da3ff'}">${esc(v)}</text>` : '',
       `</g>`);
   }
   parts.push('</svg>');
@@ -1274,7 +1340,7 @@ async function loadPads(){try{const j=await api('/api/controllers');pads=j.devic
 // Display order: d-pad first, then hotkey/select/start, face buttons, shoulders, sticks, rest last / 显示顺序：十字键优先，其余项最后
 const PAD_ORDER=['up','down','left','right','hotkey','select','start','a','b','x','y','pageup','pagedown','l2','r2','l3','r3','joystick1up','joystick1left','joystick2up','joystick2left'];
 const PAD_RANK=Object.fromEntries(PAD_ORDER.map((n,i)=>[n,i]));
-function inpRank(n){return n in PAD_RANK?PAD_RANK[n]:1000}
+function inpRank(n){const c=canonName(n);return c in PAD_RANK?PAD_RANK[c]:1000}
 function sortPadInputs(d){d.inputs.sort((a,b)=>{const ra=inpRank(a.name),rb=inpRank(b.name);return ra!==rb?ra-rb:(a.name<b.name?-1:a.name>b.name?1:0)})}
 function padOverlayHtml(d, di){
   const typeId = padTypeId(d);
@@ -1324,6 +1390,7 @@ function renderPads(){
         <span class="pill">${t('player',{n:di+1})}</span>
         <span class="name">${esc(d.deviceName)}</span>
         <span class="hint">${esc(d.type)} · ${esc(d.deviceGUID)}</span>
+        <button class="danger" style="margin-left:auto" onclick="deleteDevice(${di})" data-i18n="del_device">Delete Controller</button>
       </div>
       ${padOverlayHtml(d, di)}
       <table style="margin-top:8px"><tr><th>${t('th_func')}</th><th>${t('th_type')}</th><th>ID</th><th>${t('th_value')}</th><th>code</th></tr>
@@ -1337,6 +1404,17 @@ function renderPads(){
         <td class="mono">${esc(inp.code)}</td></tr>`).join('')}
       </table>
     </div>`).join('');
+}
+async function saveRawInput(){
+  const c=$('padRaw').value;
+  if(!c.trim())return;
+  if(!confirm(t('cf_save_pads')))return;
+  try{await post('/api/controllers/raw',{content:c});toast(t('xml_saved'));toggleRawInput()}catch(e){toast(e.message,1)}
+}
+async function deleteDevice(di){
+  const d=pads[di];if(!d)return;
+  if(!confirm(t('cf_delete_dev',{n:d.deviceName})))return;
+  try{await post('/api/controllers/delete',{deviceGUID:d.deviceGUID,deviceName:d.deviceName});toast(t('dev_deleted'));loadPads()}catch(e){toast(e.message,1)}
 }
 async function toggleRawInput(){
   const w=$('padRawWrap');
