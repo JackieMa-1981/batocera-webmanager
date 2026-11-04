@@ -557,15 +557,17 @@ const PAD_TYPES = [
   { id: 'arcade',      i18n: 'pad_arcade' },                 // 1 stick + 12 buttons
   { id: 'keyboard',    i18n: 'pad_keyboard' },               // 104-key keyboard
 ];
+// key includes the name too: two sticks can share the same GUID (e.g. cheap twin-USB adapters)
+// 键里同时含名称：同一 GUID 可能对应两只手柄（例如廉价双摇杆适配器）
+function padTypeKey(d) { return 'padType:' + (d.deviceGUID || '') + ':' + (d.deviceName || ''); }
 function padTypeId(d) {
-  const key = 'padType:' + (d.deviceGUID || d.deviceName || '');
-  const saved = localStorage.getItem(key);
+  const saved = localStorage.getItem(padTypeKey(d));
   if (saved && PAD_TYPES.some(p => p.id === saved)) return saved;
   return String(d.type || '') === 'keyboard' ? 'keyboard' : 'playstation';
 }
 function setPadType(di, id) {
   const d = pads[di];
-  localStorage.setItem('padType:' + (d.deviceGUID || d.deviceName || ''), id);
+  localStorage.setItem(padTypeKey(d), id);
   renderPads();
 }
 
